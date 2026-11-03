@@ -306,6 +306,9 @@ Files added:
   docs/session-toml.md
       The session .toml keys this fork adds, with a worked example.
 
+  docs/toml-parameters.md
+      Reference of every session .toml key, upstream and fork.
+
   VALIDATOR.md
       What this fork changes in the Validator, and why.
 
