@@ -55,6 +55,17 @@ score_threshold = 0.7
 contours_dir = '/content/drive/MyDrive/broilercamp/contours/R2_01_10_P1_SB'
 ```
 
+The same session with SAM 3 instead, no training needed:
+
+```toml
+[segmentation_model]
+backend = 'sam3'
+weights = '/content/drive/MyDrive/broilercamp/model/sam3.pt'
+prompt = 'chicken'
+score_threshold = 0.5
+contours_dir = '/content/drive/MyDrive/broilercamp/contours/R2_01_10_P1_SB'
+```
+
 Give each session its own `contours_dir`. Contour files are named after their
 video, and GoPro chapters from different cameras can share a name
 (`GX010561.MP4`), so a folder shared by several pens could mix them up. The
@@ -69,7 +80,7 @@ session avoids the question.
 | `weights` | required | Path of `model_final.pth` (or `sam3.pt`). `'model_zoo'` loads the COCO checkpoint of `config` with no fine-tuning, and then needs `classes`. |
 | `contours_dir` | none | Folder of this session's contour files, `<video stem>.h5` each. Needed unless `external_contours` lists the files. |
 | `score_threshold` | `0.7` | Detections scoring below this are dropped. |
-| `max_instances` | `number_of_animals` | Most detections kept per frame. Leave it unset so it follows the bird count; set it only to cap below or above that. |
+| `max_instances` | `number_of_animals` | Most detections kept per frame. Leave it unset so it follows the bird count; set it only to cap below or above that. With SAM 3, `0` keeps every detection it reports. |
 | `config` | from `training_metadata.json`, else `mask_rcnn_R_50_FPN_3x` | Detectron2 model-zoo config the model was fine-tuned from. |
 | `num_classes` | from `training_metadata.json`, else 1 (80 for `model_zoo`) | Detectron2 only. |
 | `classes` | all | Class indices to keep, e.g. `[14]` for COCO's bird with `weights = 'model_zoo'`. Detectron2 only. |
@@ -99,6 +110,27 @@ From each contour file's own record, before any frame is segmented:
   `on_overlap`, `classes`, `config` and `prompt` match the table.
 - **Detection cap**: the file's `max_instances` equals what this session needs,
   so a bird count corrected after export forces a re-export.
+
+## In the Segmentation App
+
+Weights you already have go into the session from the app, with no training:
+
+- **Segmentation → Detectron2 pipeline**, step **6. Export contours**: choose
+  the `model_final.pth` under **Weights**, the **Contours folder** and the
+  **Score threshold**. Steps 1 to 5 are only for training a new model; leave
+  **Weights** empty and the export uses the one step 5 trains.
+- **Segmentation → SAM 3**: choose `sam3.pt`, the prompt, the confidence and
+  the animals per frame. Its export runs only the tracked frames and redoes a
+  clip whose contour file was made with another prompt or threshold.
+
+**Save parameters** writes them as the `[segmentation_model]` table, and opening
+that `.toml` again brings them back and opens on the same panel while the
+contours are still to be exported. With the contour files loaded (**External
+contours**), the table is kept for the model the files record making them.
+Choosing **Thresholding** drops it.
+
+The export command the Detectron2 step builds carries the same weights, score
+threshold and number of animals, for running in a terminal or in Colab.
 
 ## Upstream keys under a segmentation model
 

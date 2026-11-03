@@ -316,8 +316,10 @@ class Sam3ExportThread(QThread):
         enhancement: dict,
         on_overlap: str = "merge",
         overwrite: bool = False,
+        tracking_intervals=None,
     ) -> None:
         self.videos = videos
+        self.tracking_intervals = tracking_intervals
         self.output_dir = output_dir
         self.weights = weights
         self.prompt = prompt
@@ -398,8 +400,25 @@ class Sam3ExportThread(QThread):
             local_cache=None,
             keep_cache=False,
             progress_every=1_000_000,  # the progress bar reports instead
+            classes=None,
+            intervals=None,
         )
         enhance = preprocessing_mod.make_enhancer_from(self.enhancement)
+
+        from idtrackerai.extra_tools.detectron2_pipeline import (
+            segmentation_model as sm,
+        )
+
+        # Only the frames the session tracks, as the --session command line
+        # does: each clip's share of the tracking intervals.
+        n_frames = [inference_mod.video_frame_count(video) for video in self.videos]
+        per_video = (
+            sm.local_intervals(self.tracking_intervals, n_frames)
+            if self.tracking_intervals
+            else [None] * len(self.videos)
+        )
+        self.set_progress_label.emit("Hashing the SAM 3 checkpoint...")
+        args.weights_sha256 = inference_mod.weights_sha256(self.weights)
 
         try:
             write_contours = inference_mod.load_writer()
@@ -407,13 +426,23 @@ class Sam3ExportThread(QThread):
                 if self.abort:
                     break
                 output = self.output_dir / f"{video.stem}.h5"
+                args.intervals = per_video[index - 1]
 
                 # Resume, as the command line does. An export runs for hours,
                 # and redoing a clip that already has its file would throw that
                 # away every time someone cancels and comes back. The file is
                 # still reported as written, so the session adopts the whole
                 # set rather than only this run's share of it.
-                if output.exists() and not self.overwrite:
+                # A file made with another prompt, threshold or frame range
+                # is redone rather than adopted, as the command line does.
+                if (
+                    output.exists()
+                    and not self.overwrite
+                    and inference_mod.stale_reason(
+                        output, video, args, self.enhancement
+                    )
+                    is None
+                ):
                     self.skipped.append(output)
                     self.written.append(output)
                     continue

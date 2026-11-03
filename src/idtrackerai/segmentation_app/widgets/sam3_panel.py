@@ -47,6 +47,7 @@ from qtpy.QtWidgets import (
 )
 
 from idtrackerai.extra_tools.detectron2_pipeline import gpu as gpu_mod
+from idtrackerai.extra_tools.detectron2_pipeline import segmentation_model as sm
 from idtrackerai.GUI_tools import WrappedLabel
 
 from .pipeline_threads import GpuCheckThread, Sam3ExportThread, Sam3PrelabelThread
@@ -64,6 +65,14 @@ class Sam3Panel(QWidget):
         self.output_dir: Path | None = None
         self.frames_dir: Path | None = None
         self.weights: Path | None = None
+        # Where exports go. Set from a .toml's contours_dir; otherwise
+        # sam3_contours beside the session output.
+        self.contours_dir: Path | None = None
+        self.number_of_animals = 0
+        # returns the session's tracking intervals, so only those frames run
+        self.tracking_intervals = lambda: None
+        # [segmentation_model] keys with no control here, kept from the .toml
+        self._loaded_spec: dict = {}
 
         # Unchecked until the probe comes back, so the panel opens instantly
         # and says it is still looking rather than freezing on a torch import.
@@ -264,6 +273,60 @@ class Sam3Panel(QWidget):
         self.weights_label.setText(str(self.weights))
         self._refresh_enabled()
 
+    # ----------------------------------------------------- the session's model
+    def has_chosen_weights(self) -> bool:
+        return self.weights is not None
+
+    def export_dir(self) -> Path:
+        return self.contours_dir or (self.output_dir or Path.cwd()) / "sam3_contours"
+
+    def set_number_of_animals(self, n: int) -> None:
+        self.number_of_animals = int(n or 0)
+
+    def model_spec(self) -> dict | None:
+        """The session's [segmentation_model] table, or None without a
+        checkpoint. 'Animals per frame' at 'all' is written as 0, SAM 3's
+        "keep everything", so tracking checks the files against that."""
+        if self.weights is None or not self.prompt.text().strip():
+            return None
+        spec = dict(self._loaded_spec)
+        spec.update(
+            backend="sam3",
+            weights=str(self.weights),
+            prompt=self.prompt.text().strip(),
+            score_threshold=round(self.score_threshold.value(), 4),
+            max_instances=self.max_instances.value(),
+            contours_dir=str(self.export_dir()),
+        )
+        return spec
+
+    def set_model_spec(self, spec: dict | None) -> None:
+        """Restores the panel from a session's [segmentation_model] table."""
+        try:
+            spec = sm.normalize_model(spec)
+        except sm.SegmentationModelError as exc:
+            logging.warning("Ignoring [segmentation_model]: %s", exc)
+            spec = None
+        if spec is None or spec["backend"] != "sam3":
+            self._loaded_spec = {}
+            return
+        self._loaded_spec = {
+            key: value
+            for key, value in spec.items()
+            if value is not None and value != sm.DEFAULTS.get(key)
+        }
+        self.weights = Path(spec["weights"])
+        self.weights_label.setText(str(self.weights))
+        self.prompt.setText(spec["prompt"])
+        self.score_threshold.setValue(spec["score_threshold"])
+        if spec["max_instances"] is not None:
+            self.max_instances.setValue(spec["max_instances"])
+        else:
+            self.max_instances.setValue(self.number_of_animals)
+        if spec.get("contours_dir"):
+            self.contours_dir = Path(spec["contours_dir"])
+        self._refresh_enabled()
+
     def choose_frames(self) -> None:
         start = str(self.frames_dir or self.output_dir or Path.cwd())
         folder = QFileDialog.getExistingDirectory(
@@ -303,7 +366,7 @@ class Sam3Panel(QWidget):
     def run_export(self) -> None:
         if self.weights is None or not self.video_paths:
             return
-        output_dir = (self.output_dir or Path.cwd()) / "sam3_contours"
+        output_dir = self.export_dir()
         output_dir.mkdir(parents=True, exist_ok=True)
 
         self.export_thread.set_parameters(
@@ -316,6 +379,7 @@ class Sam3Panel(QWidget):
             max_instances=self.max_instances.value(),
             enhancement=self.settings(),
             overwrite=self.reexport.isChecked(),
+            tracking_intervals=self.tracking_intervals(),
         )
         self.export_thread.start()
 

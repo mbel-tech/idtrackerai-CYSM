@@ -164,7 +164,13 @@ def normalize_model(spec: dict | None) -> dict | None:
         )
 
     _number(out, "score_threshold", float, 0, 1)
-    _number(out, "max_instances", int, 1)
+    _number(out, "max_instances", int, 0)
+    if out["max_instances"] == 0 and out["backend"] != "sam3":
+        raise SegmentationModelError(
+            "segmentation_model.max_instances = 0 (keep every detection) is"
+            ' only for backend = "sam3"; Detectron2 needs a cap. Leave it out'
+            " to use number_of_animals"
+        )
     _number(out, "num_classes", int, 1)
     _number(out, "min_size", int, 32)
     _number(out, "merge_overlap", float, 0, 1, low_open=True)
@@ -212,7 +218,8 @@ def effective_max_instances(spec: dict, number_of_animals: int | None) -> int:
     holding more. With the count known from the session there is no reason to
     guess, and a pen whose count changes by day gets the right cap each day.
     """
-    if spec.get("max_instances"):
+    if spec.get("max_instances") is not None:
+        # 0 is SAM 3's "keep everything it reports"
         return int(spec["max_instances"])
     if number_of_animals and number_of_animals > 0:
         return int(number_of_animals)
