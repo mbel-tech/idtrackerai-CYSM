@@ -84,7 +84,11 @@ Files changed relative to the fork point:
       tracked as a single session, resolved and checked in
       prepare_tracking(). New presence_intervals parameter recording, per
       identity, the frames in which that animal is present; the Validator
-      stops reporting an identity as missing outside them. Fixed
+      stops reporting an identity as missing outside them. New
+      segmentation_model parameter (the [segmentation_model] table) naming
+      the model a session's contours come from; prepare_tracking() derives
+      the contour files from its contours_dir and refuses files made with
+      other settings or not covering the tracking intervals. Fixed
       prepare_tracking() raising NameError because idtrackerai_version()
       was never imported.
 
@@ -293,6 +297,14 @@ Files added:
 
   docs/sam3-pipeline.md
       Documentation for the SAM 3 route.
+
+  src/idtrackerai/extra_tools/detectron2_pipeline/segmentation_model.py
+  tests/segmentation_model_test.py
+      The [segmentation_model] table of a session .toml, read by the
+      exporter's --session mode and by tracking, and its tests.
+
+  docs/session-toml.md
+      The session .toml keys this fork adds, with a worked example.
 
   VALIDATOR.md
       What this fork changes in the Validator, and why.
