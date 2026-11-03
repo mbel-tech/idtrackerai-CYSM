@@ -4,6 +4,8 @@ Upstream idtracker.ai's session keys are documented on its
 [usage page](https://idtracker.ai/latest/user_guide/usage.html). This page covers
 what this fork adds, and what the upstream keys mean once the animals' outlines
 come from a model instead of from thresholding.
+[toml-parameters.md](toml-parameters.md) is the full key reference, upstream
+keys included.
 
 ## One file for both stages
 

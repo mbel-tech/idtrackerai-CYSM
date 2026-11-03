@@ -209,7 +209,9 @@ idtrackerai_d2_export --session sessions/*.toml
 idtrackerai --load sessions/pen_01.toml --track
 ```
 
-Every key is in **[docs/session-toml.md](docs/session-toml.md)**.
+How the model route works is in **[docs/session-toml.md](docs/session-toml.md)**;
+every key a session `.toml` accepts, upstream and fork, is in
+**[docs/toml-parameters.md](docs/toml-parameters.md)**.
 The intensity thresholds and background subtraction grey out, because they take
 no part once contours come from a model.
 
