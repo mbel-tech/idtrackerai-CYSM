@@ -38,13 +38,13 @@ from .widgets import (
     BkgWidget,
     BlobInfoWidget,
     Detectron2Panel,
-    Sam3Panel,
     EnhancementPreview,
     EnhancementWidget,
     FrameAnalyzer,
     IntensityThresholds,
     OpenVideoWidget,
     ROIWidget,
+    Sam3Panel,
     SegmentationSourceWidget,
     TrackingIntervalsWidget,
 )
@@ -387,7 +387,7 @@ class SegmentationGUI(GUIBase):
         self.tracking_interval.setValue(self.session.tracking_intervals)
         self.ROI_Widget.setValue(self.session.roi_list, self.session.exclusive_rois)
         self.enhancement.setSettings(self.session.enhancement)
-        self.segmentation_source.setValue(self.session.external_contours)
+        self.segmentation_source.setValue(self.contours_to_show())
         self.intensity_thresholds.setValue(self.session.intensity_ths)
         self.area_thresholds.setValue(self.session.area_ths)
         self.n_animals.setValue(self.session.number_of_animals)
@@ -400,6 +400,32 @@ class SegmentationGUI(GUIBase):
         )
         self.bkg_widget.checkBox.setChecked(self.session.use_bkg)
         self.videoPlayer.update()
+
+    def contours_to_show(self):
+        """The session's contour files, including those a [segmentation_model]
+        table places in its contours_dir, once they exist. Shown so that a
+        .toml written for the model route opens on that route."""
+        if self.session.external_contours is not None:
+            return self.session.external_contours
+        if not self.session.segmentation_model:
+            return None
+        from idtrackerai.extra_tools.detectron2_pipeline import (
+            segmentation_model as sm,
+        )
+
+        try:
+            spec = sm.normalize_model(self.session.segmentation_model)
+            paths = sm.default_contour_paths(spec, self.session.video_paths)  # type: ignore[arg-type]
+        except sm.SegmentationModelError as exc:
+            logging.warning(str(exc))
+            return None
+        if not all(path.is_file() for path in paths):
+            logging.info(
+                "The [segmentation_model] contours are not exported yet; showing"
+                " thresholding until they are"
+            )
+            return None
+        return [str(path) for path in paths]
 
     def new_parameters(self, params: dict):
         "Receives new toml parameters from OpenVideoWidget"
@@ -445,6 +471,10 @@ class SegmentationGUI(GUIBase):
         # Otherwise switching back to thresholding would silently keep tracking
         # from a contour file loaded earlier.
         self.session.external_contours = self.segmentation_source.value()
+        if self.session.external_contours is None:
+            # thresholding was chosen here, so a model table loaded from the
+            # .toml must not bring its contour files back at tracking time
+            self.session.segmentation_model = None
         # same reason: out_parameters leaves enhancement out when it is off, so
         # a value loaded from a .toml would otherwise outlive choosing "None"
         self.session.enhancement = parameters.get("enhancement")
@@ -495,6 +525,9 @@ class SegmentationGUI(GUIBase):
                 if isinstance(external_contours, list)
                 else str(external_contours)
             )
+            if self.session.segmentation_model:
+                # kept so the saved .toml still says which model made them
+                out["segmentation_model"] = self.session.segmentation_model
 
         if self.session_name.text():  # put the name at the first position
             out = {"name": self.session_name.text()} | out

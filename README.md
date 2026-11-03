@@ -189,6 +189,27 @@ external_contours = "contours/clip_01.h5"
 ```
 
 …or pick it in the Segmentation App under **Segmentation → External contours**.
+
+Or describe the model in the session's `.toml` and let one file drive both
+stages. The exporter then runs only the tracked frames, caps detections at the
+number of animals, and tracking refuses contour files made any other way:
+
+```toml
+number_of_animals = 9
+tracking_intervals = [[3600, 36000]]
+
+[segmentation_model]
+backend = "detectron2"
+weights = "model/model_final.pth"
+contours_dir = "contours/pen_01"
+```
+
+```bash
+idtrackerai_d2_export --session sessions/*.toml
+idtrackerai --load sessions/pen_01.toml --track
+```
+
+Every key is in **[docs/session-toml.md](docs/session-toml.md)**.
 The intensity thresholds and background subtraction grey out, because they take
 no part once contours come from a model.
 

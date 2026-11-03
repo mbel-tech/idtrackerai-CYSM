@@ -25,6 +25,7 @@ from idtrackerai.extra_tools.detectron2_pipeline.bundle import build
 EXPECTED = {
     "tools/preprocessing.py",
     "tools/errors.py",
+    "tools/segmentation_model.py",
     "tools/train_detectron2.py",
     "tools/detectron2_export_contours.py",
     "tools/check_videos.py",

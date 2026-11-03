@@ -31,6 +31,9 @@ from pathlib import Path
 PIPELINE_FILES = [
     ("preprocessing.py", "tools/preprocessing.py"),
     ("errors.py", "tools/errors.py"),
+    # the [segmentation_model] table of a session .toml, read by the exporter's
+    # --session mode; beside it, because inference imports it by bare name
+    ("segmentation_model.py", "tools/segmentation_model.py"),
     # imported by name from a flat folder on the runtime, which is why it
     # falls back to a bare "from errors import ..." with no package
     ("dataset.py", "tools/dataset.py"),

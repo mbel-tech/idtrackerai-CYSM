@@ -106,6 +106,14 @@ class Session:
     One path per video path, in the same order, because the exporter writes one
     file per clip while a session made of several clips is one timeline. A
     single path is still accepted for a single-clip session."""
+    segmentation_model: None | dict = None
+    """The ``[segmentation_model]`` table: which model makes this session's
+    contours (backend, weights, score threshold, ...) and, through
+    ``contours_dir``, where they are. Read by ``idtrackerai_d2_export
+    --session`` to produce them, and here to check, before segmenting, that
+    the files in ``external_contours`` were made that way and cover the
+    tracking intervals. See
+    :mod:`idtrackerai.extra_tools.detectron2_pipeline.segmentation_model`."""
     # bkg_model: None | np.ndarray = None
     name: str = ""
     output_dir: Path | None | str = None
@@ -203,6 +211,20 @@ class Session:
             "Setting video paths to:\n    " + "\n    ".join(map(str, self.video_paths))
         )
 
+        from .extra_tools.detectron2_pipeline import segmentation_model as sm
+
+        try:
+            self.segmentation_model = sm.normalize_model(self.segmentation_model)
+            if self.segmentation_model is not None and self.external_contours is None:
+                self.external_contours = [
+                    str(path)
+                    for path in sm.default_contour_paths(
+                        self.segmentation_model, self.video_paths
+                    )
+                ]
+        except sm.SegmentationModelError as exc:
+            raise IdtrackeraiError(str(exc)) from exc
+
         if self.external_contours is not None:
             given = (
                 [self.external_contours]
@@ -220,6 +242,12 @@ class Session:
                 raise IdtrackeraiError(
                     "External contour file(s) not found:\n    "
                     + "\n    ".join(str(path) for path in missing)
+                    + (
+                        "\nExport them first, where the GPU is, with"
+                        " idtrackerai_d2_export --session <this .toml>"
+                        if self.segmentation_model is not None
+                        else ""
+                    )
                 )
             if len(resolved) != len(self.video_paths):
                 raise IdtrackeraiError(
@@ -313,6 +341,9 @@ class Session:
                 self.video_paths, self.frames_per_episode, self.tracking_intervals
             )
         )
+
+        if self.external_contours is not None:
+            self.check_external_contours()
 
         trackable_n_frames = sum(
             interv[1] - interv[0] for interv in self.tracking_intervals
@@ -712,6 +743,70 @@ class Session:
     def bkg_model(self) -> None:
         self.background_path.unlink(missing_ok=True)
         self.background_settings_path.unlink(missing_ok=True)
+
+    def check_external_contours(self) -> None:
+        """Refuses contour files that would track the wrong thing.
+
+        Two checks, both cheap (file attributes only) and both silent failures
+        otherwise. Coverage: a file exported over part of its video holds no
+        animals elsewhere, so tracking a frame outside that part would see an
+        empty arena. Provenance, when a [segmentation_model] table is given:
+        contours from other weights, another score threshold or a detection cap
+        that no longer matches the number of animals load without complaint.
+        """
+        from .extra_tools.detectron2_pipeline import segmentation_model as sm
+
+        paths = (
+            [self.external_contours]
+            if isinstance(self.external_contours, (str, Path))
+            else list(self.external_contours)  # type: ignore[arg-type]
+        )
+        needed = sm.local_intervals(self.tracking_intervals, self.video_paths_n_frames)
+
+        spec = self.segmentation_model
+        max_instances = sha = None
+        if spec is not None:
+            try:
+                max_instances = sm.effective_max_instances(spec, self.number_of_animals)
+            except sm.SegmentationModelError as exc:
+                raise IdtrackeraiError(str(exc)) from exc
+            weights = Path(spec["weights"]).expanduser()
+            if spec["weights"] != sm.MODEL_ZOO and weights.is_file():
+                from hashlib import sha256
+
+                digest = sha256()
+                with open(weights, "rb") as file:
+                    for chunk in iter(lambda: file.read(1 << 20), b""):
+                        digest.update(chunk)
+                sha = digest.hexdigest()
+            elif spec["weights"] != sm.MODEL_ZOO:
+                logging.info(
+                    "Weights %s are not on this machine; checking contour files"
+                    " against their file name only",
+                    weights,
+                )
+
+        problems = []
+        for path, own_needed in zip(paths, needed):
+            with h5py.File(path, "r") as file:
+                attrs = dict(file.attrs)
+            exported = sm.exported_intervals_of(attrs)
+            if not sm.covers(exported, own_needed):
+                problems.append(
+                    f"{Path(path).name} holds frames {exported} of its video, but"
+                    f" the tracking intervals need {own_needed}"
+                )
+            if spec is not None:
+                assert max_instances is not None
+                for problem in sm.mismatches(attrs, spec, max_instances, sha):
+                    problems.append(f"{Path(path).name}: {problem}")
+        if problems:
+            raise IdtrackeraiError(
+                "The external contour files do not match this session:\n    "
+                + "\n    ".join(problems)
+                + "\nRe-export them with idtrackerai_d2_export --session <this"
+                " .toml>, which redoes exactly the out-of-date ones."
+            )
 
     @staticmethod
     def normalized_enhancement(enhancement: dict | None) -> dict | None:

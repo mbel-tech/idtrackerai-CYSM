@@ -82,9 +82,11 @@ import numpy as np
 
 try:
     from . import preprocessing as fp
+    from . import segmentation_model as sm
 except ImportError:  # loaded by path, e.g. from a Colab bundle
     sys.path.insert(0, str(Path(__file__).resolve().parent))
     import preprocessing as fp  # type: ignore[no-redef]
+    import segmentation_model as sm  # type: ignore[no-redef]
 
 
 class ExportError(RuntimeError):
@@ -102,6 +104,13 @@ def file_sha256(path: Path) -> str:
         for chunk in iter(lambda: file.read(1 << 20), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def weights_sha256(weights) -> str:
+    """Hash of the weights file; for model_zoo, a stable label instead."""
+    if str(weights) == "model_zoo":
+        return "model_zoo"
+    return file_sha256(Path(weights))
 
 
 def video_frame_count(video: Path) -> int:
@@ -154,6 +163,24 @@ def stale_reason(output: Path, video: Path, args, enhancement: dict) -> str | No
     for key, expected in checks.items():
         if differs(key, expected):
             return f"{key} differs (file: {attrs.get(key)!r}, now: {expected!r})"
+    try:
+        recorded_classes = json.loads(attrs.get("classes", "null"))
+    except (TypeError, ValueError):
+        return "classes record is unreadable"
+    if recorded_classes != getattr(args, "classes", None):
+        return f"classes differ (file: {recorded_classes}, now: {getattr(args, 'classes', None)})"
+    # A file exported over part of the video can be reused only for frames it
+    # holds; one exported over all of it, for any part.
+    needed = getattr(args, "intervals", None)
+    try:
+        exported = sm.exported_intervals_of(attrs)
+    except (TypeError, ValueError):
+        return "exported_intervals record is unreadable"
+    if needed is None:
+        if exported is not None:
+            return "it holds only part of the video, the whole video is needed now"
+    elif not sm.covers(exported, needed):
+        return f"it holds frames {exported}, frames {needed} are needed now"
     try:
         if json.loads(attrs.get("enhancement", "null")) != enhancement:
             return "enhancement differs"
@@ -353,9 +380,11 @@ class Detectron2Predictor:
         # Class count and test scale must match training. Take them from the
         # training record unless the user overrode them explicitly, because a
         # mismatch here produces a model that loads cleanly and predicts nonsense.
+        model_zoo_weights = str(args.weights) == "model_zoo"
         num_classes = args.num_classes
         if num_classes is None:
-            num_classes = (metadata or {}).get("num_classes", 1)
+            # the COCO checkpoint has COCO's 80 classes, whatever was trained here
+            num_classes = 80 if model_zoo_weights else (metadata or {}).get("num_classes", 1)
         min_size = args.min_size
         if min_size is None:
             min_size = (metadata or {}).get("min_size_test", 640)
@@ -367,18 +396,35 @@ class Detectron2Predictor:
 
         cfg = get_cfg()
         cfg.merge_from_file(model_zoo.get_config_file(config))
-        print(f"Loading weights {args.weights} (unpickled by torch: trusted files only)")
-        cfg.MODEL.WEIGHTS = str(args.weights)
+        if model_zoo_weights:
+            cfg.MODEL.WEIGHTS = model_zoo.get_checkpoint_url(config)
+            print(f"Loading the COCO checkpoint of {config} (not fine-tuned)")
+        else:
+            print(f"Loading weights {args.weights} (unpickled by torch: trusted files only)")
+            cfg.MODEL.WEIGHTS = str(args.weights)
         cfg.MODEL.ROI_HEADS.NUM_CLASSES = num_classes
         cfg.MODEL.ROI_HEADS.SCORE_THRESH_TEST = args.score_threshold
         cfg.TEST.DETECTIONS_PER_IMAGE = args.max_instances
         cfg.INPUT.MIN_SIZE_TEST = min_size
         cfg.MODEL.DEVICE = args.device
+        self.classes = getattr(args, "classes", None)
+        if self.classes:
+            # Filtering happens after detection, so other classes must not use
+            # up the cap: let the model return more, and cap again afterwards.
+            cfg.TEST.DETECTIONS_PER_IMAGE = max(100, args.max_instances)
+        self.max_instances = args.max_instances
         self._predictor = DefaultPredictor(cfg)
         self.description = config
 
     def predict(self, frame: np.ndarray):
         instances = self._predictor(frame)["instances"].to("cpu")
+        if self.classes:
+            keep = np.isin(instances.pred_classes.numpy(), self.classes)
+            # instances come sorted by score, so the first ones are the best
+            import torch  # type: ignore
+
+            index = np.flatnonzero(keep)[: self.max_instances]
+            instances = instances[torch.as_tensor(index, dtype=torch.long)]
         masks = list(instances.pred_masks.numpy().astype(np.uint8))
         scores = [float(s) for s in instances.scores.numpy()]
         return masks, scores
@@ -411,6 +457,47 @@ def build_predictor(args, metadata: dict | None):
     else:
         predictor = Detectron2Predictor(args, metadata)
     return predictor, predictor.description
+
+
+def contours_of_frame(predictor, frame: np.ndarray, args, kernel):
+    """The model's animals in one frame, cleaned up, as contours and scores."""
+    masks, scores = predictor.predict(frame)
+
+    masks = [clean_mask(m, args.min_component, kernel, args.dilate) for m in masks]
+    keep = [i for i, m in enumerate(masks) if m.any()]
+    masks = [masks[i] for i in keep]
+    scores = [scores[i] for i in keep]
+
+    if args.dedup_iou < 1.0 and len(masks) > 1:
+        masks, scores = deduplicate(masks, scores, args.dedup_iou)
+
+    masks, scores = resolve_overlaps(masks, scores, args.on_overlap, args.merge_overlap)
+
+    frame_contours: list[np.ndarray] = []
+    frame_scores: list[float] = []
+    for mask, score in zip(masks, scores):
+        for contour in mask_to_contours(mask, args.min_area):
+            frame_contours.append(contour)
+            frame_scores.append(score)
+    return frame_contours, frame_scores
+
+
+def seek(cap, frame_index: int) -> None:
+    """Moves the capture so the next read() returns ``frame_index``.
+
+    The same cv2 seek idtracker.ai's own segmentation relies on, checked, and
+    falling back to decoding from the start when the container will not seek
+    exactly, because an off-by-some seek would shift every contour in time.
+    """
+    if cap.set(cv2.CAP_PROP_POS_FRAMES, frame_index) and int(
+        cap.get(cv2.CAP_PROP_POS_FRAMES)
+    ) == frame_index:
+        return
+    print(f"  seek to frame {frame_index} was inexact; decoding up to it", flush=True)
+    cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+    for _ in range(frame_index):
+        if not cap.grab():
+            break
 
 
 def export_video(
@@ -491,84 +578,88 @@ def _export_opened_video(
     print(f"{video.name}: {n_frames} frames at {width}x{height}", flush=True)
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
 
-    contours_per_frame: list[list[np.ndarray]] = []
-    scores_per_frame: list[list[float]] = []
+    # With --session, only the frames idtracker.ai will track are run through
+    # the model; the rest keep an empty slot, so frame numbers still line up
+    # with the video. The file records which frames it holds, and tracking
+    # refuses to use it for any others.
+    intervals = getattr(args, "intervals", None)
+    if intervals is None:
+        todo = [[0, n_frames]]
+    else:
+        todo = sm.normalize_intervals(intervals, n_frames)
+    n_todo = sum(end - start for start, end in todo)
+    if intervals is not None:
+        print(
+            f"  exporting {n_todo} of {n_frames} frames: "
+            + ", ".join(f"[{start}, {end})" for start, end in todo),
+            flush=True,
+        )
+
+    contours_per_frame: list[list[np.ndarray]] = [[] for _ in range(n_frames)]
+    scores_per_frame: list[list[float]] = [[] for _ in range(n_frames)]
     empty_frames = 0
     short_frames = 0
     read_failures = 0
+    done = 0
     clock = time.monotonic()
+    position = 0
 
-    for frame_index in range(n_frames):
-        if abort is not None and abort():
-            cap.release()
-            if temporary_copy is not None and not args.keep_cache:
-                temporary_copy.unlink(missing_ok=True)
-            return None
+    for start, end in todo:
+        if start != position:
+            seek(cap, start)
+        position = end
+        for frame_index in range(start, end):
+            if abort is not None and abort():
+                cap.release()
+                if temporary_copy is not None and not args.keep_cache:
+                    temporary_copy.unlink(missing_ok=True)
+                return None
 
-        ok, frame = cap.read()
-        if not ok:
-            # Keep the frame slot so frame numbers stay aligned with the video.
-            # idtracker.ai treats a frame with no contours as one with no
-            # visible animals, which is what an unreadable frame amounts to.
-            # Counted apart from frames the model genuinely found empty.
-            contours_per_frame.append([])
-            scores_per_frame.append([])
-            read_failures += 1
-            if read_failures <= 5:
-                print(f"  WARNING: could not read frame {frame_index}", flush=True)
-            if read_failures > max(1, MAX_READ_FAILURE_FRACTION * n_frames):
-                raise ExportError(
-                    f"{video.name}: more than {MAX_READ_FAILURE_FRACTION:.0%} of the"
-                    f" frames are unreadable ({read_failures} so far, at frame"
-                    f" {frame_index}); the file is probably damaged or truncated"
-                )
-            # Report it here too: a run whose tail is unreadable would
-            # otherwise leave the bar short of the end, which reads as a hang.
-            if progress is not None:
-                progress(frame_index + 1, n_frames)
-            continue
+            done += 1
+            ok, frame = cap.read()
+            if not ok:
+                # Keep the frame slot so frame numbers stay aligned with the
+                # video. idtracker.ai treats a frame with no contours as one
+                # with no visible animals, which is what an unreadable frame
+                # amounts to. Counted apart from frames the model found empty.
+                read_failures += 1
+                if read_failures <= 5:
+                    print(f"  WARNING: could not read frame {frame_index}", flush=True)
+                if read_failures > max(1, MAX_READ_FAILURE_FRACTION * n_todo):
+                    raise ExportError(
+                        f"{video.name}: more than {MAX_READ_FAILURE_FRACTION:.0%} of"
+                        f" the frames are unreadable ({read_failures} so far, at"
+                        f" frame {frame_index}); the file is probably damaged or"
+                        " truncated"
+                    )
+                # Report it here too: a run whose tail is unreadable would
+                # otherwise leave the bar short of the end, which reads as a hang.
+                if progress is not None:
+                    progress(done, n_todo)
+                continue
 
-        masks, scores = predictor.predict(enhance(frame))
-
-        masks = [clean_mask(m, args.min_component, kernel, args.dilate) for m in masks]
-        keep = [i for i, m in enumerate(masks) if m.any()]
-        masks = [masks[i] for i in keep]
-        scores = [scores[i] for i in keep]
-
-        if args.dedup_iou < 1.0 and len(masks) > 1:
-            masks, scores = deduplicate(masks, scores, args.dedup_iou)
-
-        masks, scores = resolve_overlaps(
-            masks, scores, args.on_overlap, args.merge_overlap
-        )
-
-        frame_contours: list[np.ndarray] = []
-        frame_scores: list[float] = []
-        for mask, score in zip(masks, scores):
-            for contour in mask_to_contours(mask, args.min_area):
-                frame_contours.append(contour)
-                frame_scores.append(score)
-
-        contours_per_frame.append(frame_contours)
-        scores_per_frame.append(frame_scores)
-
-        if not frame_contours:
-            empty_frames += 1
-        elif len(frame_contours) < args.max_instances:
-            short_frames += 1
-
-        if progress is not None:
-            progress(frame_index + 1, n_frames)
-
-        if frame_index and frame_index % args.progress_every == 0:
-            done = frame_index + 1
-            rate = done / max(time.monotonic() - clock, 1e-6)
-            remaining = (n_frames - done) / max(rate, 1e-6)
-            print(
-                f"  {done}/{n_frames} ({100 * done / n_frames:.1f}%)"
-                f"  {rate:.1f} fps  ~{remaining / 60:.0f} min left",
-                flush=True,
+            frame_contours, frame_scores = contours_of_frame(
+                predictor, enhance(frame), args, kernel
             )
+            contours_per_frame[frame_index] = frame_contours
+            scores_per_frame[frame_index] = frame_scores
+
+            if not frame_contours:
+                empty_frames += 1
+            elif len(frame_contours) < args.max_instances:
+                short_frames += 1
+
+            if progress is not None:
+                progress(done, n_todo)
+
+            if done > 1 and (done - 1) % args.progress_every == 0:
+                rate = done / max(time.monotonic() - clock, 1e-6)
+                remaining = (n_todo - done) / max(rate, 1e-6)
+                print(
+                    f"  {done}/{n_todo} ({100 * done / n_todo:.1f}%)"
+                    f"  {rate:.1f} fps  ~{remaining / 60:.0f} min left",
+                    flush=True,
+                )
 
     if read_failures:
         print(f"  WARNING: {read_failures} unreadable frame(s) left empty", flush=True)
@@ -580,6 +671,10 @@ def _export_opened_video(
     partial = output.with_suffix(output.suffix + ".partial")
     # A contour file should say what made it, now that more than one thing can.
     backend_provenance = {"backend": args.backend}
+    if getattr(args, "classes", None):
+        backend_provenance["classes"] = json.dumps(args.classes)
+    if intervals is not None:
+        backend_provenance["exported_intervals"] = json.dumps(todo)
     if args.backend == "sam3":
         backend_provenance["prompt"] = args.prompt
 
@@ -620,13 +715,14 @@ def _export_opened_video(
         "video": video.name,
         "output": str(output),
         "frames": len(contours_per_frame),
+        "processed_frames": n_todo,
         "contours": total,
         "contours_per_frame": round(total / max(len(contours_per_frame), 1), 3),
         "empty_frames": empty_frames,
         "short_frames": short_frames,
         "read_failures": read_failures,
         "seconds": round(elapsed, 1),
-        "fps": round(len(contours_per_frame) / max(elapsed, 1e-6), 2),
+        "fps": round(n_todo / max(elapsed, 1e-6), 2),
         "size_mb": round(output.stat().st_size / 1e6, 2),
         "finished": datetime.now(timezone.utc).isoformat(timespec="seconds"),
     }
@@ -685,8 +781,25 @@ def main():
     source.add_argument(
         "--videos", type=Path, nargs="+", help="several videos, or a glob"
     )
-    parser.add_argument("--weights", type=Path, required=True)
-    target = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument(
+        "--session",
+        type=Path,
+        nargs="+",
+        help=(
+            "idtracker.ai session .toml file(s), or a glob. Each file's"
+            " [segmentation_model] table says which model to run and where the"
+            " contours go; only the frames in its tracking_intervals are run."
+            " The model options below are then taken from the table, not from"
+            " the command line"
+        ),
+    )
+    parser.add_argument(
+        "--weights",
+        type=Path,
+        help="model_final.pth (or sam3.pt); 'model_zoo' for the COCO checkpoint"
+        " of --config, not fine-tuned",
+    )
+    target = parser.add_mutually_exclusive_group()
     target.add_argument("--output", type=Path, help="contour file, with --video")
     target.add_argument(
         "--output-dir",
@@ -768,10 +881,48 @@ def main():
         ),
     )
     parser.add_argument(
+        "--classes",
+        type=int,
+        nargs="+",
+        help="keep only these class indices, e.g. 14 for COCO's bird with"
+        " --weights model_zoo (default: every class)",
+    )
+    parser.add_argument(
         "--limit", type=int, default=0, help="stop after N frames (0 = whole video)"
     )
     fp.add_arguments(parser)
     args = parser.parse_args()
+    args.intervals = None
+
+    if args.session:
+        model_flags = {
+            "--weights": args.weights,
+            "--output": args.output,
+            "--output-dir": args.output_dir,
+            "--config": args.config,
+            "--num-classes": args.num_classes,
+            "--min-size": args.min_size,
+            "--prompt": args.prompt,
+            "--classes": args.classes,
+        }
+        used = [flag for flag, value in model_flags.items() if value is not None]
+        if used:
+            parser.error(
+                f"{', '.join(used)} cannot be combined with --session: the"
+                " session's [segmentation_model] table sets them"
+            )
+        if args.limit:
+            parser.error("--limit cannot be combined with --session")
+        return session_main(args)
+
+    if args.weights is None:
+        parser.error("--weights is required")
+    if not (args.output or args.output_dir):
+        parser.error("one of --output or --output-dir is required")
+    if args.classes is not None:
+        args.classes = sorted(set(args.classes))
+    if str(args.weights) == "model_zoo" and args.backend != "detectron2":
+        parser.error("--weights model_zoo only applies to --backend detectron2")
 
     if args.videos and not args.output_dir:
         parser.error("--videos needs --output-dir")
@@ -785,6 +936,7 @@ def main():
         "--num-classes": args.num_classes,
         "--min-size": args.min_size,
         "--config": args.config,
+        "--classes": args.classes,
     }
     if args.backend == "sam3":
         if not args.prompt:
@@ -804,7 +956,11 @@ def main():
     # SAM 3 was never fine-tuned on this setup, so there is no training record
     # to read and nothing to check the enhancement against. Looking for one
     # would only produce a warning about a file that was never meant to exist.
-    metadata = load_training_metadata(args.weights) if args.backend == "detectron2" else None
+    metadata = (
+        load_training_metadata(args.weights)
+        if args.backend == "detectron2" and str(args.weights) != "model_zoo"
+        else None
+    )
     # Inference adopts whatever the model was trained with, unless the user
     # deliberately overrides it. Retyping the flags identically at inference
     # time was the old requirement, and an easy thing to get silently wrong.
@@ -817,7 +973,7 @@ def main():
     print(f"enhancement: {fp.describe(enhancement)}")
     enhance = fp.make_enhancer_from(enhancement)
 
-    if args.backend == "detectron2":
+    if args.backend == "detectron2" and str(args.weights) != "model_zoo":
         if metadata is None:
             print(
                 f"No training_metadata.json beside {args.weights}; cannot check"
@@ -850,7 +1006,7 @@ def main():
         key = video.resolve().relative_to(root).as_posix()
         return f"{key}#limit{args.limit}" if args.limit else key
 
-    args.weights_sha256 = file_sha256(args.weights)
+    args.weights_sha256 = weights_sha256(args.weights)
 
     def needs_export(video: Path) -> bool:
         output = output_for(video)
@@ -938,6 +1094,270 @@ def main():
             "video, not from one previous frame."
         )
     if failed:
+        raise SystemExit(1)
+
+
+# --------------------------------------------------------------------------
+# --session: export what a session .toml says it will track
+# --------------------------------------------------------------------------
+
+# table keys that become exporter options of the same name
+_MODEL_OPTIONS = (
+    "backend", "prompt", "config", "num_classes", "min_size", "classes",
+    "score_threshold", "on_overlap", "merge_overlap", "min_component",
+    "dilate", "dedup_iou", "min_area", "device",
+)
+
+
+def load_session_toml(path: Path) -> dict:
+    """Reads a session .toml the way idtracker.ai does: keys are case
+    insensitive and an empty string means "not set"."""
+    try:
+        import tomllib
+
+        data = tomllib.loads(path.read_text(encoding="utf-8"))
+    except ImportError:  # Python < 3.11
+        import toml  # type: ignore
+
+        data = toml.loads(path.read_text(encoding="utf-8"))
+    return {
+        str(key).lower(): (None if value == "" else value)
+        for key, value in data.items()
+    }
+
+
+def _expand(patterns) -> list[Path]:
+    paths: list[Path] = []
+    for pattern in patterns:
+        pattern = Path(pattern).expanduser()
+        if any(ch in str(pattern) for ch in "*?"):
+            paths.extend(sorted(pattern.parent.glob(pattern.name)))
+        else:
+            paths.append(pattern)
+    return [p for p in paths if not _is_sidecar(p)]
+
+
+def session_jobs(toml_paths, frame_count=video_frame_count) -> list[dict]:
+    """One job per video of every session: what to run, over which frames,
+    and where to write. Raises SystemExit naming the file at the first problem,
+    before any GPU time is spent."""
+    jobs: dict[Path, dict] = {}
+    for toml_path in _expand(toml_paths):
+        def fail(message: str, toml_path: Path = toml_path):
+            raise SystemExit(f"{toml_path}: {message}")
+
+        if not toml_path.is_file():
+            fail("not found")
+        try:
+            params = load_session_toml(toml_path)
+        except Exception as exc:  # noqa: BLE001 - any parse error, named
+            fail(f"could not read it ({exc})")
+        try:
+            spec = sm.normalize_model(params.get("segmentation_model"))
+        except sm.SegmentationModelError as exc:
+            fail(str(exc))
+        if spec is None:
+            fail(
+                "has no [segmentation_model] table, so there is no model to run."
+                " Add one, or export with --video/--videos"
+            )
+
+        videos = params.get("video_paths")
+        if not videos:
+            fail("has no video_paths")
+        if isinstance(videos, str):
+            videos = [videos]
+        videos = [Path(v).expanduser() for v in videos]
+        missing = [str(v) for v in videos if not v.is_file()]
+        if missing:
+            fail("video(s) not found: " + ", ".join(missing))
+
+        given = params.get("external_contours")
+        try:
+            if given:
+                outputs = [Path(given)] if isinstance(given, str) else [Path(p) for p in given]
+                outputs = [p.expanduser() for p in outputs]
+                if len(outputs) != len(videos):
+                    fail(
+                        f"external_contours lists {len(outputs)} file(s) for"
+                        f" {len(videos)} video(s); there must be one per video"
+                    )
+            else:
+                outputs = sm.default_contour_paths(spec, videos)
+            max_instances = sm.effective_max_instances(
+                spec, params.get("number_of_animals")
+            )
+        except sm.SegmentationModelError as exc:
+            fail(str(exc))
+
+        n_frames = [frame_count(v) for v in videos]
+        for video, n in zip(videos, n_frames):
+            if n <= 0:
+                fail(f"OpenCV cannot count the frames of {video}")
+        per_video = sm.local_intervals(params.get("tracking_intervals"), n_frames)
+
+        model_key = json.dumps(
+            {k: v for k, v in spec.items() if k != "contours_dir"}
+            | {"max_instances": max_instances},
+            sort_keys=True,
+        )
+        for video, output, intervals in zip(videos, outputs, per_video):
+            key = output.resolve()
+            if key in jobs:
+                # the same clip in two sessions: export the union once
+                job = jobs[key]
+                if job["video"].resolve() != video.resolve():
+                    fail(
+                        f"{output} is also where {job['session']} puts the"
+                        f" contours of a different video ({job['video'].name})"
+                    )
+                if job["model_key"] != model_key:
+                    fail(
+                        f"{video.name} is also in {job['session']} with a"
+                        " different [segmentation_model] or number of animals;"
+                        " one contour file cannot serve both"
+                    )
+                job["intervals"] = sm.normalize_intervals(
+                    job["intervals"] + intervals, job["n_frames"]
+                )
+                job["session"] += f", {toml_path.name}"
+                continue
+            jobs[key] = {
+                "session": toml_path.name,
+                "video": video,
+                "output": output,
+                "n_frames": n_frames[videos.index(video)],
+                "intervals": intervals,
+                "spec": spec,
+                "max_instances": max_instances,
+                "model_key": model_key,
+            }
+    if not jobs:
+        raise SystemExit("No session files matched")
+    return list(jobs.values())
+
+
+def _args_for(args, spec: dict, max_instances: int):
+    run_args = argparse.Namespace(**vars(args))
+    for option in _MODEL_OPTIONS:
+        setattr(run_args, option, spec[option])
+    run_args.weights = (
+        spec["weights"] if spec["weights"] == sm.MODEL_ZOO else Path(spec["weights"]).expanduser()
+    )
+    run_args.max_instances = max_instances
+    run_args.output = None
+    run_args.output_dir = None
+    run_args.limit = 0
+    return run_args
+
+
+def session_main(args) -> None:
+    jobs = session_jobs(args.session)
+    write_contours = load_writer()
+    print(f"{len(jobs)} video(s) from {len(args.session)} session argument(s)")
+
+    groups: dict[str, list[dict]] = {}
+    for job in jobs:
+        groups.setdefault(job["model_key"], []).append(job)
+
+    failed: list[str] = []
+    exported = 0
+    for group in groups.values():
+        spec, max_instances = group[0]["spec"], group[0]["max_instances"]
+        run_args = _args_for(args, spec, max_instances)
+        if run_args.weights != sm.MODEL_ZOO and not Path(run_args.weights).is_file():
+            for job in group:
+                failed.append(job["video"].name)
+            print(f"ERROR: weights not found: {run_args.weights}")
+            continue
+
+        metadata = (
+            load_training_metadata(run_args.weights)
+            if run_args.backend == "detectron2" and run_args.weights != sm.MODEL_ZOO
+            else None
+        )
+        trained_with = (metadata or {}).get("enhancement")
+        enhancement, notes = fp.resolve_settings(
+            run_args, fallback=trained_with, fallback_label="the model's training record"
+        )
+        for note in notes:
+            print(note)
+        enhance = fp.make_enhancer_from(enhancement)
+        run_args.weights_sha256 = weights_sha256(run_args.weights)
+
+        pending = []
+        for job in group:
+            run_args.intervals = job["intervals"]
+            output = job["output"]
+            if args.overwrite or not output.exists():
+                pending.append(job)
+                continue
+            reason = stale_reason(output, job["video"], run_args, enhancement)
+            if reason:
+                print(f"{output.name} exists but is out of date ({reason}); redoing it")
+                pending.append(job)
+        print(
+            f"\n{sm.weights_label(spec)}, {max_instances} per frame:"
+            f" {len(group) - len(pending)} already exported, {len(pending)} to do"
+        )
+        if not pending:
+            continue
+
+        predictor, model_description = build_predictor(run_args, metadata)
+        for i, job in enumerate(pending, start=1):
+            run_args.intervals = job["intervals"]
+            print(f"\n[{i}/{len(pending)}] {job['video'].name} ({job['session']})", flush=True)
+            try:
+                stats = export_video(
+                    job["video"], job["output"], run_args, predictor,
+                    model_description, enhance, enhancement, write_contours,
+                )
+            except KeyboardInterrupt:
+                print("\nInterrupted. Finished videos are kept; rerun to continue.")
+                raise SystemExit(130)
+            except ExportError as exc:
+                print(f"\nERROR: {exc}", flush=True)
+                failed.append(job["video"].name)
+                continue
+            if stats is None:
+                break
+            exported += 1
+            stats["key"] = job["video"].resolve().as_posix()
+            stats["sessions"] = job["session"]
+            log_path = job["output"].parent / "export_log.json"
+            log = []
+            if log_path.is_file():
+                try:
+                    log = json.loads(log_path.read_text(encoding="utf-8"))
+                except json.JSONDecodeError:
+                    log = []
+            log = [e for e in log if e.get("key", e.get("video")) != stats["key"]]
+            log.append(stats)
+            log_path.write_text(json.dumps(log, indent=2), encoding="utf-8")
+
+    print(f"\n{exported} video(s) exported")
+    # Per video, how often the model saw fewer animals than the session holds.
+    # A model trained on few pens shows its blind spots here first.
+    print("\nframes with no detection / fewer than the number of animals:")
+    for job in jobs:
+        log_path = job["output"].parent / "export_log.json"
+        try:
+            log = json.loads(log_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        key = job["video"].resolve().as_posix()
+        entry = next((e for e in log if e.get("key") == key), None)
+        if entry is None:
+            continue
+        processed = max(entry.get("processed_frames", entry["frames"]), 1)
+        print(
+            f"  {job['session']:<32} {job['video'].name:<16}"
+            f" {100 * entry['empty_frames'] / processed:5.1f}%"
+            f" / {100 * entry['short_frames'] / processed:5.1f}%"
+            f"  (of {processed} frames, {job['max_instances']} animals)"
+        )
+    if failed:
+        print(f"{len(failed)} video(s) FAILED: {', '.join(failed)}")
         raise SystemExit(1)
 
 

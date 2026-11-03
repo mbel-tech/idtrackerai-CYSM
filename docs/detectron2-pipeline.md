@@ -167,6 +167,11 @@ Then either add `external_contours = "contours/clip_01.h5"` to the clip's
 `.toml`, or pick the file in the Segmentation App under **Segmentation →
 External contours**.
 
+For many sessions, put a `[segmentation_model]` table in each session's `.toml`
+instead and run `idtrackerai_d2_export --session sessions/*.toml`: it exports
+only the tracked frames, at the right detection cap per session, into the folder
+tracking will look in. See [session-toml.md](session-toml.md).
+
 ## Things worth knowing
 
 **The train/validation split is by recording, not by frame.** Frames sampled a
