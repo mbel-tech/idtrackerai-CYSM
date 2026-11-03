@@ -59,7 +59,8 @@ def test_no_table_means_no_model():
             "min_size",
         ),
         ({"weights": "w.pth", "score_threshold": 1.5}, "at most 1"),
-        ({"weights": "w.pth", "max_instances": 0}, "at least 1"),
+        ({"weights": "w.pth", "max_instances": 0}, "only for backend"),
+        ({"weights": "w.pth", "max_instances": -1}, "at least 0"),
         ({"weights": "w.pth", "on_overlap": "fuse"}, "on_overlap"),
         ({"weights": "model_zoo"}, "classes"),
         ({"weights": "model_zoo", "classes": ["bird"]}, "class indices"),
@@ -471,3 +472,26 @@ def test_export_then_track_from_the_same_toml(tmp_path, monkeypatch, capsys):
     )
     with pytest.raises(IdtrackeraiError, match="other weights"):
         session.prepare_tracking()
+
+
+def test_sam3_tables():
+    spec = sm.normalize_model(
+        {"backend": "sam3", "weights": "sam3.pt", "prompt": "chicken"}
+    )
+    assert sm.effective_max_instances(spec, 9) == 9
+    keep_all = sm.normalize_model(spec | {"max_instances": 0})
+    assert sm.effective_max_instances(keep_all, 9) == 0
+
+    attrs = {
+        "backend": "sam3",
+        "weights": "sam3.pt",
+        "prompt": "fish",
+        "score_threshold": 0.7,
+        "max_instances": 9,
+        "on_overlap": "merge",
+    }
+    assert sm.mismatches(attrs, spec, 9) == [
+        "prompt is 'fish', the table says 'chicken'"
+    ]
+    detectron2 = sm.normalize_model({"weights": "sam3.pt"})
+    assert any("backend" in p for p in sm.mismatches(attrs, detectron2, 9))

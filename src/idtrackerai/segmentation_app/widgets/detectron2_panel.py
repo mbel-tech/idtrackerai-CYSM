@@ -62,6 +62,7 @@ from idtrackerai.extra_tools.detectron2_pipeline import install_gpu as install_m
 from idtrackerai.extra_tools.detectron2_pipeline import prep_state as prep_state_mod
 from idtrackerai.extra_tools.detectron2_pipeline import preprocessing as fp
 from idtrackerai.extra_tools.detectron2_pipeline import sampling as sampling_mod
+from idtrackerai.extra_tools.detectron2_pipeline import segmentation_model as sm
 from idtrackerai.GUI_tools import WrappedLabel
 
 from .enhancement_widget import EnhancementWidget
@@ -82,6 +83,10 @@ class Detectron2Panel(QWidget):
         super().__init__()
         self.enhancement = enhancement
         self.state: prep_state_mod.PrepState | None = None
+        self.number_of_animals = 0
+        # [segmentation_model] keys this panel has no control for, kept from
+        # the loaded .toml so saving it again does not drop them
+        self._loaded_spec: dict = {}
 
         # What the Segmentation App currently has open, kept apart from the
         # annotation list so the panel can tell "the user has not touched this"
@@ -531,6 +536,26 @@ class Detectron2Panel(QWidget):
         resumable, so it can be stopped and restarted as often as needed.
         """
         page = QWidget()
+        self.weights_hint = WrappedLabel()
+        self.weights_hint.setText(
+            "Already have trained weights? Choose them here; steps 1 to 5 are"
+            " only for training a new model. They are saved in the session"
+            " .toml as its [segmentation_model]."
+        )
+        self.weights_path = QLineEdit()
+        self.weights_path.setPlaceholderText("<model folder>/model_final.pth")
+        self.weights_path.editingFinished.connect(self._update_export_command)
+        weights_browse = QPushButton("Choose file...")
+        weights_browse.clicked.connect(self._choose_weights)
+        self.score_threshold = QDoubleSpinBox()
+        self.score_threshold.setRange(0.05, 1.0)
+        self.score_threshold.setSingleStep(0.05)
+        self.score_threshold.setDecimals(2)
+        self.score_threshold.setValue(sm.DEFAULTS["score_threshold"])
+        self.score_threshold.valueChanged.connect(
+            lambda _v: self._update_export_command()
+        )
+
         self.export_status = WrappedLabel()
         self.export_command = QPlainTextEdit()
         self.export_command.setReadOnly(True)
@@ -544,17 +569,23 @@ class Detectron2Panel(QWidget):
 
         form = QFormLayout()
         form.setContentsMargins(0, 0, 0, 0)
-        row = QHBoxLayout()
-        row.setContentsMargins(0, 0, 0, 0)
-        row.addWidget(self.contours_dir)
-        row.addWidget(contours_browse)
-        holder = QWidget()
-        holder.setLayout(row)
-        form.addRow("Contours folder", holder)
+        for label, field, button in (
+            ("Weights", self.weights_path, weights_browse),
+            ("Contours folder", self.contours_dir, contours_browse),
+        ):
+            row = QHBoxLayout()
+            row.setContentsMargins(0, 0, 0, 0)
+            row.addWidget(field)
+            row.addWidget(button)
+            holder = QWidget()
+            holder.setLayout(row)
+            form.addRow(label, holder)
+        form.addRow("Score threshold", self.score_threshold)
 
         layout = QVBoxLayout(page)
         layout.setContentsMargins(4, 4, 4, 4)
         layout.setSpacing(4)
+        layout.addWidget(self.weights_hint)
         layout.addWidget(self.export_status)
         layout.addLayout(form)
         layout.addWidget(self.export_command)
@@ -1235,6 +1266,73 @@ class Detectron2Panel(QWidget):
             self.model_dir.setText(name)
             self._update_export_command()
 
+    def _choose_weights(self) -> None:
+        start = self.weights_path.text() or self.model_dir.text()
+        name, _ = QFileDialog.getOpenFileName(
+            self, "Trained Detectron2 weights", start, "PyTorch weights (*.pth *.pt)"
+        )
+        if name:
+            self.weights_path.setText(name)
+            self._update_export_command()
+
+    def weights(self) -> Path | None:
+        """The weights to export with: the file chosen in step 6, else the
+        model step 5 trains into its folder, else None."""
+        if self.weights_path.text().strip():
+            return Path(self.weights_path.text().strip())
+        if self.model_dir.text():
+            return Path(self.model_dir.text()) / "model_final.pth"
+        return None
+
+    def set_number_of_animals(self, n: int) -> None:
+        """The export's detection cap. Without it the exporter keeps at most
+        5 per frame, and an arena holding more loses animals silently."""
+        self.number_of_animals = int(n or 0)
+        self._update_export_command()
+
+    def has_chosen_weights(self) -> bool:
+        """True when weights were picked in step 6 or came from the .toml,
+        as opposed to merely implied by step 5's model folder."""
+        return bool(self.weights_path.text().strip())
+
+    def model_spec(self) -> dict | None:
+        """The session's [segmentation_model] table, or None without weights."""
+        weights = self.weights()
+        if weights is None:
+            return None
+        spec = dict(self._loaded_spec)
+        spec.update(
+            backend="detectron2",
+            weights=str(weights),
+            score_threshold=round(self.score_threshold.value(), 4),
+        )
+        if self.contours_dir.text():
+            spec["contours_dir"] = self.contours_dir.text()
+        return spec
+
+    def set_model_spec(self, spec: dict | None) -> None:
+        """Restores step 6 from a session's [segmentation_model] table."""
+        try:
+            spec = sm.normalize_model(spec)
+        except sm.SegmentationModelError as exc:
+            logging.warning("Ignoring [segmentation_model]: %s", exc)
+            spec = None
+        if spec is None or spec["backend"] != "detectron2":
+            self._loaded_spec = {}
+            return
+        # keep only what was given, so defaults are not written back as if chosen
+        self._loaded_spec = {
+            key: value
+            for key, value in spec.items()
+            if value is not None and value != sm.DEFAULTS.get(key)
+        }
+        self.weights_path.setText(spec["weights"])
+        self.score_threshold.setValue(spec["score_threshold"])
+        if spec.get("contours_dir"):
+            self.contours_dir.setText(spec["contours_dir"])
+        self.steps.setCurrentIndex(5)
+        self._update_export_command()
+
     def _choose_contours_dir(self) -> None:
         name = QFileDialog.getExistingDirectory(
             self, "Folder for the exported contours", self.contours_dir.text()
@@ -1360,7 +1458,7 @@ class Detectron2Panel(QWidget):
 
     def _update_export_command(self) -> None:
         videos = self.video_paths
-        model = self.model_dir.text() or "<model folder>"
+        weights = self.weights() or Path("<model folder>") / "model_final.pth"
         contours = self.contours_dir.text() or "<contours folder>"
 
         # A glob of the first clip's folder is only right when the list IS
@@ -1371,9 +1469,13 @@ class Detectron2Panel(QWidget):
         command = (
             f'"{sys.executable}" "{self._script("inference.py")}"'
             f' --videos {target}'
-            f' --weights "{Path(model) / "model_final.pth"}"'
+            f' --weights "{weights}"'
             f' --output-dir "{contours}"'
         )
+        if abs(self.score_threshold.value() - sm.DEFAULTS["score_threshold"]) > 1e-9:
+            command += f" --score-threshold {self.score_threshold.value():g}"
+        if self.number_of_animals > 0:
+            command += f" --max-instances {self.number_of_animals}"
         self.export_command.setPlainText(command)
         self._export_scope = scope
 
@@ -1475,6 +1577,9 @@ class Detectron2Panel(QWidget):
             (self.install_button, "d2_install"),
             (self.train_log, "d2_train"),
             (self.contours_dir, "d2_contours_folder"),
+            (self.weights_path, "d2_weights"),
+            (self.weights_hint, "d2_weights"),
+            (self.score_threshold, "d2_score_threshold"),
             (self.export_command, "d2_export"),
             (self.copy_command_button, "d2_export"),
             (self.export_status, "d2_export"),

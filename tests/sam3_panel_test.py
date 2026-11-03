@@ -214,6 +214,10 @@ def export_thread(monkeypatch, tmp_path):
 
     monkeypatch.setattr(inference_mod, "export_video", fake_export_video)
     monkeypatch.setattr(inference_mod, "load_writer", lambda: (lambda *a, **k: None))
+    # the checkpoint is not real, and the files written above are stand-ins:
+    # an existing file counts as current unless a test says otherwise
+    monkeypatch.setattr(inference_mod, "weights_sha256", lambda weights: "fake")
+    monkeypatch.setattr(inference_mod, "stale_reason", lambda *a, **k: None)
 
     import idtrackerai.extra_tools.detectron2_pipeline.sam3_predictor as predictor_mod
 
@@ -251,6 +255,59 @@ def test_clips_that_already_have_contours_are_not_redone(export_thread):
 
     assert exported == ["b.mp4", "c.mp4"]
     assert [p.name for p in thread.skipped] == ["a.h5"]
+
+
+def test_a_clip_exported_another_way_is_redone(export_thread):
+    """A file made with another prompt or frame range is not adopted."""
+    from idtrackerai.extra_tools.detectron2_pipeline import inference as inference_mod
+
+    thread, exported, tmp_path, monkeypatch = export_thread
+    out = tmp_path / "contours"
+    out.mkdir()
+    clips = make_clips(tmp_path, ["a.mp4", "b.mp4"])
+    (out / "a.h5").write_bytes(b"made with another prompt")
+    (out / "b.h5").write_bytes(b"current")
+    monkeypatch.setattr(
+        inference_mod,
+        "stale_reason",
+        lambda output, *a, **k: "prompt differs" if output.name == "a.h5" else None,
+    )
+    thread.set_parameters(
+        videos=clips, output_dir=out, weights=tmp_path / "sam3.pt",
+        prompt="chicken", device="cpu", score_threshold=0.5,
+        max_instances=0, enhancement={},
+    )
+    thread.run()
+
+    assert exported == ["a.mp4"]
+    assert [p.name for p in thread.skipped] == ["b.h5"]
+
+
+def test_only_the_tracked_frames_are_exported(export_thread):
+    """The session's tracking intervals reach the exporter, per clip."""
+    from idtrackerai.extra_tools.detectron2_pipeline import inference as inference_mod
+
+    thread, _, tmp_path, monkeypatch = export_thread
+    out = tmp_path / "contours"
+    out.mkdir()
+    seen = []
+
+    def export_recording_intervals(video, output, args, *a, **k):
+        seen.append(args.intervals)
+        Path(output).write_bytes(b"c")
+        return {"video": Path(video).name, "frames": 1}
+
+    monkeypatch.setattr(inference_mod, "export_video", export_recording_intervals)
+    monkeypatch.setattr(inference_mod, "video_frame_count", lambda video: 100)
+    thread.set_parameters(
+        videos=make_clips(tmp_path, ["a.mp4", "b.mp4"]), output_dir=out,
+        weights=tmp_path / "sam3.pt", prompt="chicken", device="cpu",
+        score_threshold=0.5, max_instances=0, enhancement={},
+        tracking_intervals=[[30, 150]],
+    )
+    thread.run()
+
+    assert seen == [[[30, 100]], [[0, 50]]]
 
 
 def test_the_session_still_gets_every_clip_it_needs(export_thread):

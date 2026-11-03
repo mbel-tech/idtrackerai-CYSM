@@ -163,6 +163,11 @@ def stale_reason(output: Path, video: Path, args, enhancement: dict) -> str | No
     for key, expected in checks.items():
         if differs(key, expected):
             return f"{key} differs (file: {attrs.get(key)!r}, now: {expected!r})"
+    backend = getattr(args, "backend", "detectron2")
+    if attrs.get("backend", "detectron2") != backend:
+        return f"backend differs (file: {attrs.get('backend')!r}, now: {backend!r})"
+    if backend == "sam3" and attrs.get("prompt") != args.prompt:
+        return f"prompt differs (file: {attrs.get('prompt')!r}, now: {args.prompt!r})"
     try:
         recorded_classes = json.loads(attrs.get("classes", "null"))
     except (TypeError, ValueError):

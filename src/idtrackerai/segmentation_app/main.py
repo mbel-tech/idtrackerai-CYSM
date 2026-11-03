@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 import cv2
+import h5py
 import toml
 from qtpy.QtCore import Qt, QTimer
 from qtpy.QtGui import QKeyEvent
@@ -144,6 +145,9 @@ class SegmentationGUI(GUIBase):
             )
         )
         self.n_animals.editingFinished.connect(self.n_animals.clearFocus)
+        self.n_animals.valueChanged.connect(self.detectron2_panel.set_number_of_animals)
+        self.n_animals.valueChanged.connect(self.sam3_panel.set_number_of_animals)
+        self.sam3_panel.tracking_intervals = lambda: self.tracking_interval.value()
         self.n_animals.valueChanged.connect(self.blobInfo.setNAnimals)
         self.tracking_interval.range_slider.single_value_changed.connect(
             self.videoPlayer.setCurrentFrame
@@ -387,7 +391,17 @@ class SegmentationGUI(GUIBase):
         self.tracking_interval.setValue(self.session.tracking_intervals)
         self.ROI_Widget.setValue(self.session.roi_list, self.session.exclusive_rois)
         self.enhancement.setSettings(self.session.enhancement)
-        self.segmentation_source.setValue(self.contours_to_show())
+        self.detectron2_panel.set_model_spec(self.session.segmentation_model)
+        self.sam3_panel.set_model_spec(self.session.segmentation_model)
+        contours = self.contours_to_show()
+        self.segmentation_source.setValue(contours)
+        backend = (self.session.segmentation_model or {}).get("backend", "detectron2")
+        if contours is None and self.session.segmentation_model:
+            # a .toml naming a model whose contours are not exported yet opens
+            # on the panel that exports them, not on thresholding
+            self.segmentation_source.source.setCurrentText(
+                SAM3 if backend == "sam3" else DETECTRON2
+            )
         self.intensity_thresholds.setValue(self.session.intensity_ths)
         self.area_thresholds.setValue(self.session.area_ths)
         self.n_animals.setValue(self.session.number_of_animals)
@@ -471,10 +485,10 @@ class SegmentationGUI(GUIBase):
         # Otherwise switching back to thresholding would silently keep tracking
         # from a contour file loaded earlier.
         self.session.external_contours = self.segmentation_source.value()
-        if self.session.external_contours is None:
-            # thresholding was chosen here, so a model table loaded from the
-            # .toml must not bring its contour files back at tracking time
-            self.session.segmentation_model = None
+        # out_parameters leaves it out unless a model route was chosen, so a
+        # table loaded from the .toml cannot bring contours back after the
+        # user switched to thresholding here
+        self.session.segmentation_model = parameters.get("segmentation_model")
         # same reason: out_parameters leaves enhancement out when it is off, so
         # a value loaded from a .toml would otherwise outlive choosing "None"
         self.session.enhancement = parameters.get("enhancement")
@@ -525,9 +539,16 @@ class SegmentationGUI(GUIBase):
                 if isinstance(external_contours, list)
                 else str(external_contours)
             )
-            if self.session.segmentation_model:
-                # kept so the saved .toml still says which model made them
-                out["segmentation_model"] = self.session.segmentation_model
+
+        # The model the contours come from, whether they exist yet or not:
+        # in the Detectron2 mode the weights chosen in its export step, and
+        # with contour files loaded only weights chosen explicitly, since
+        # those files may come from SAM 3 or another model entirely.
+        panel = self.model_panel_for(self.segmentation_source.mode(), external_contours)
+        if panel is not None:
+            spec = panel.model_spec()
+            if spec is not None:
+                out["segmentation_model"] = spec
 
         if self.session_name.text():  # put the name at the first position
             out = {"name": self.session_name.text()} | out
@@ -541,6 +562,34 @@ class SegmentationGUI(GUIBase):
         ):
             out["exclusive_rois"] = self.ROI_Widget.exclusive_rois.isChecked()
         return out
+
+    def model_panel_for(self, mode: str, external_contours):
+        """The panel whose model the session's contours come from, or None.
+
+        In the Detectron2 and SAM 3 modes, that mode's panel. With contour
+        files loaded, the panel of the backend the files record making them,
+        and only if a model was chosen there explicitly: files from elsewhere
+        must not be labelled with whatever a panel happens to hold.
+        """
+        if mode == DETECTRON2:
+            return self.detectron2_panel
+        if mode == SAM3:
+            return self.sam3_panel
+        if mode != EXTERNAL or external_contours is None:
+            return None
+        first = (
+            external_contours[0]
+            if isinstance(external_contours, list)
+            else external_contours
+        )
+        try:
+            with h5py.File(first, "r") as file:
+                backend = file.attrs.get("backend", "detectron2")
+        except OSError:
+            return None
+        backend = backend.decode() if isinstance(backend, bytes) else str(backend)
+        panel = self.sam3_panel if backend == "sam3" else self.detectron2_panel
+        return panel if panel.has_chosen_weights() else None
 
     def unacceptable_parameters(self, parameters: dict) -> bool:
         if (
