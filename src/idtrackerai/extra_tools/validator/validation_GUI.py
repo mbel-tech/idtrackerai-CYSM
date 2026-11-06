@@ -457,6 +457,9 @@ class ValidationGUI(GUIBase):
         self.interpolator.interpolation_accepted.connect(
             self.errorsExplorer.accepted_interpolation
         )
+        self.errorsExplorer.interpolate_all_flagged.connect(
+            self.interpolator.batch_interpolate
+        )
 
         self.id_labels = IdLabels()
         self.id_labels.needToDraw.connect(self.video_player.update)

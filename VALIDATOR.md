@@ -29,6 +29,8 @@ that.
 | **Min duration** | Hides errors shorter than N frames. |
 | **Filter pair** | Shows only errors belonging to two chosen identities. |
 | **N** | Selects the next error in the list. |
+| **Flag unambiguous** | Ticks every "Miss id" gap that no other animal comes near (the **Vicinity** distance). |
+| **Interpolate all flagged** | Fills every ticked gap with a straight line, as one Ctrl+Z step. |
 | **I** | Starts interpolating the selected error, or the selected identity. |
 | **PCHIP** | An interpolation mode that cannot overshoot between fixed points. |
 | **Hold A / D / ← / →** | Scrubs through frames instead of stepping once. |
@@ -182,6 +184,36 @@ no identity (internally, `-1`). Turn it off to see them again.
 Selects the next error in the list and jumps to it, wrapping round at the end,
 so stepping through the list does not need the mouse.
 
+### Flag unambiguous and Interpolate all flagged
+
+**Closes the "Miss id" gaps that nobody could be confused about, all at once.**
+Most of a long list of "Miss id" errors is an animal that vanished for a few
+frames with nobody else around, and the correction is the same every time: a
+straight line. Confirming that, one error at a time, is the slow part.
+
+Each "Miss id" row has a **Flag** checkbox. **Flag unambiguous** ticks it for
+every gap where no other animal comes closer than **Vicinity** (default 50 px)
+to the straight line across the gap, in any frame of the gap. Other animals
+that have no position in a frame are ignored in that frame. Tick or untick any
+box by hand afterwards; the button only ever ticks.
+
+**Interpolate all flagged** then fills every ticked gap with that same line, so
+what was judged is what is drawn. It is always linear, whatever mode the
+interpolation dialog is set to, and the whole batch is one Ctrl+Z step.
+
+Things to know:
+
+- **The flags are lost when the list is rebuilt**, which happens after the fill,
+  and whenever a filter or the jumps threshold changes.
+- **A gap needs a position on both sides.** One at the very start or end of the
+  video has no line to draw. It is never ticked by the button, and if ticked by
+  hand it is skipped, and the summary under the buttons says so.
+- **"Unambiguous" only looks at where the other animals are.** It does not know
+  about walls, structures or a path a fish could not have swum. Skim the result
+  before moving on, and use Ctrl+Z if it is wrong.
+- **Recomputing is not instant.** The trajectories are recomputed from the
+  first to the last frame of the batch, as with any edit.
+
 ## The interpolator
 
 **PCHIP, a mode that cannot overshoot.** A cubic or fifth-order spline through
@@ -255,8 +287,9 @@ means leaving the Validator.
 | File | What changed |
 |---|---|
 | `extra_tools/validator/validation_GUI.py` | Undo stack, Swap/Extend/Merge, resilient save, autosave, presence-interval dialog, `I` and Ctrl+Z |
-| `extra_tools/validator/widgets/errors_explorer.py` | Min duration, pair filter, `Next [N]`, presence-interval masking |
-| `extra_tools/validator/widgets/interpolator.py` | PCHIP, Linear default, Enter to apply, click-to-jump |
+| `extra_tools/validator/widgets/errors_explorer.py` | Min duration, pair filter, `Next [N]`, presence-interval masking, Flag column, Vicinity, Flag unambiguous, Interpolate all flagged |
+| `extra_tools/validator/widgets/gaps.py` | New — the straight line across a gap and the "nobody is near" test, in plain NumPy |
+| `extra_tools/validator/widgets/interpolator.py` | PCHIP, Linear default, Enter to apply, click-to-jump, `batch_interpolate` |
 | `extra_tools/validator/widgets/length_calibrator.py` | Preview line, delete-by-row, numeric distance prompt |
 | `extra_tools/validator/widgets/video_info.py` | New — the Video Info tab |
 | `blob.py` | `swap_identity`, `propagate_swap_identity` |
@@ -301,7 +334,17 @@ not have, and a length-calibration change that had accidentally dropped the
 explanatory popup and the filter that keeps incomplete calibrations out of the
 saved session.
 
-**None of this is tested automatically.** There is no `pytest-qt` in this
-project, so the GUI cannot be driven headlessly. The logic underneath it — the
+**Flag unambiguous and Interpolate all flagged came later.** They were in a
+second hand-patched copy that the first extraction did not look at, and were
+ported separately from it. The gap test is a vectorised rewrite of the original
+per-frame loops, and batch interpolation became one undo step. The original also
+told the error list that a Jump had been corrected after filling Miss id gaps,
+which would have marked a selected Jump as accepted; that is not carried over.
+
+**Most of this is not tested automatically.** There is no `pytest-qt` in this
+project, so the GUI cannot be driven by clicks. The logic underneath it — the
 identity swap, the merge, the presence-interval masking — was verified
 directly; everything above that was checked by hand in the running Validator.
+The exception is the flagged-gap tools: `tests/validator_flagged_gaps_test.py`
+calls their buttons on a real Validator window without a screen, fills gaps in
+real blobs and undoes them.

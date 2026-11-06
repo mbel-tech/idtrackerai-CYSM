@@ -152,12 +152,23 @@ Files changed relative to the fork point:
   src/idtrackerai/extra_tools/validator/widgets/errors_explorer.py
       Minimum-duration and identity-pair filters, a next-error button, and
       masking of missing-identity errors outside an identity's declared
-      presence interval.
+      presence interval; a Flag column on missing-identity errors, with a
+      button that flags the gaps no other animal comes near and another that
+      interpolates every flagged gap.
 
   src/idtrackerai/extra_tools/validator/widgets/interpolator.py
       PCHIP interpolation mode, which cannot overshoot between fixed
       points; linear default; Enter applies; clicking a fixed point jumps
-      to its frame; undo integration.
+      to its frame; undo integration; batch interpolation of flagged gaps
+      as a single undo step.
+
+  src/idtrackerai/extra_tools/validator/widgets/gaps.py
+      The straight line across a gap in one identity's trajectory, and the
+      test for whether another animal comes near it, used by the two files
+      above.
+
+  tests/validator_flagged_gaps_test.py
+      Tests for the above, down to the real Validator and Ctrl+Z.
 
   src/idtrackerai/extra_tools/validator/widgets/length_calibrator.py
   src/idtrackerai/extra_tools/validator/widgets/__init__.py
