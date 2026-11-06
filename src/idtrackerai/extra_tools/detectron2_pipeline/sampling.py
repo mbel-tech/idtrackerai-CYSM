@@ -19,7 +19,6 @@ import json
 import os
 import random
 import re
-from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -67,6 +66,14 @@ class VideoPlan:
     in a folder of fifty does not cost the whole run, and so the caller can
     name exactly which ones were skipped.
     """
+    name: str = ""
+    """What the clip's frames are called: the file name, or the one
+    :func:`assign_names` gave it when file names are shared. Defaults to the
+    file name's stem."""
+
+    def __post_init__(self) -> None:
+        if not self.name:
+            self.name = self.video.stem
 
 
 @dataclass
@@ -102,90 +109,9 @@ def frame_count_or_zero(path: Path) -> int:
         return 0
 
 
-def check_distinct_stems(videos: Sequence[Path]) -> None:
-    """Refuses a set whose file names collide once the folders are dropped.
-
-    Frames are named after the video stem and all land in one flat folder, so
-    two clips called clip_01.mp4 in different folders would overwrite each
-    other's frames and corrupt the by-recording split, silently. Better to say
-    so before writing anything.
-    """
-    seen: dict[str, list[Path]] = {}
-    for video in videos:
-        seen.setdefault(video.stem, []).append(video)
-    clashes = {stem: paths for stem, paths in seen.items() if len(paths) > 1}
-    if not clashes:
-        return
-    detail = "; ".join(
-        f"{stem}: " + ", ".join(str(p) for p in paths)
-        for stem, paths in sorted(clashes.items())
-    )
-    raise SamplingError(
-        "Two or more videos share a file name, and sampled frames are named "
-        "after it, so they would overwrite each other. Rename or separate "
-        f"them first. {detail}"
-    )
-
-
 def _location(path) -> str:
     """A path in a form two spellings of the same file agree on."""
     return os.path.normcase(os.path.realpath(path))
-
-
-def check_against_folder(videos: Sequence[Path], output: Path) -> None:
-    """Refuses a clip whose name is already taken, in this folder, by another.
-
-    :func:`check_distinct_stems` only compares the clips of one run. A corpus is
-    built over several runs, and a second run that brings in ``day2/cam1.mp4``
-    when ``day1/cam1.mp4`` was sampled before would write ``cam1_f000012.png``
-    over the earlier frame and record both as one clip -- no error, and an
-    annotated frame that silently shows a different video.
-
-    Only frames still on disk count, as in :func:`_merge_manifest`: a batch the
-    user deleted leaves nothing to overwrite. A record with no source path
-    (written before paths were kept), or a manifest that cannot be read, cannot
-    say what it came from, so it does not object.
-    """
-    manifest = output / "sampling_manifest.json"
-    try:
-        records = json.loads(manifest.read_text(encoding="utf-8")).get("frames", [])
-    except (OSError, ValueError, AttributeError):
-        return
-
-    held: dict[str, str] = {}
-    for record in records if isinstance(records, list) else []:
-        if not isinstance(record, dict):
-            continue
-        name, source, path = (
-            record.get("file_name"),
-            record.get("source_video"),
-            record.get("source_path"),
-        )
-        if not (name and source and path) or not (output / name).is_file():
-            continue
-        source = str(source)
-        for suffix in VIDEO_SUFFIXES:
-            if source.lower().endswith(suffix):
-                source = source[: -len(suffix)]
-                break
-        held.setdefault(source, str(path))
-
-    clashes = [
-        (video, held[video.stem])
-        for video in videos
-        if video.stem in held and _location(held[video.stem]) != _location(video)
-    ]
-    if not clashes:
-        return
-    detail = "; ".join(
-        f"{os.path.abspath(video)} vs {earlier}" for video, earlier in clashes
-    )
-    raise SamplingError(
-        f"{output} already holds frames from a different video with the same"
-        " file name, and sampled frames are named after it, so these would"
-        " overwrite or be mistaken for each other. Sample them into a new"
-        f" folder, or rename one of each pair first. {detail}"
-    )
 
 
 def recorded_clips(output: Path) -> list[tuple[str, str]]:
@@ -463,19 +389,26 @@ def assign_names(
         used.add(name.casefold())
         named[location] = name
 
-    wanted = {clip.location for clip in survey.clip_of.values()}
+    wanted = {clip.location: clip for clip in survey.clip_of.values()}
     chosen = {
         location: held[location][1] if location in held else named[location]
         for location in wanted
     }
-    count = Counter(name.casefold() for name in chosen.values())
-    repeated = sorted({name for name in chosen.values() if count[name.casefold()] > 1})
-    if repeated:  # unreachable unless the manifest already repeats a name
+    users: dict[str, list[tuple[str, str]]] = {}  # folded name -> (name, path)
+    for location, name in chosen.items():
+        users.setdefault(name.casefold(), []).append((name, wanted[location].path))
+    repeated = sorted(sorted(group) for group in users.values() if len(group) > 1)
+    if repeated:  # only a manifest that already repeats a name can get here
+        detail = "\n  ".join(
+            f"{group[0][0]}: " + ", ".join(path for _, path in group)
+            for group in repeated
+        )
         raise SamplingError(
-            "Could not give every video a different name; repeated: "
-            + ", ".join(repeated)
-            + ". The frames folder's manifest may already record two different"
-            " videos under one name."
+            "Could not give every video a different name, because this frames"
+            " folder already records different videos under one name:\n  "
+            + detail
+            + "\nSample into a new frames folder, or delete the frames of one of"
+            " these videos from this folder first."
         )
     return {video: chosen[clip.location] for video, clip in survey.clip_of.items()}
 
@@ -647,13 +580,30 @@ def videos_in_folder(folder: Path, recursive: bool = False) -> list[Path]:
     )
 
 
+def _first_spellings(videos: Sequence[Path]) -> list[int]:
+    """Positions of the videos to keep when one file is listed under two spellings.
+
+    ``day1/cam1.avi`` and ``/data/day1/cam1.avi`` are one clip, so only the
+    first mention stays. Without this the clip would be planned twice and take
+    two shares of the frames.
+    """
+    seen: set[str] = set()
+    keep: list[int] = []
+    for position, video in enumerate(videos):
+        where = _location(video)
+        if where not in seen:
+            seen.add(where)
+            keep.append(position)
+    return keep
+
+
 def resolve_videos(patterns: Sequence[Path], recursive: bool = False) -> list[Path]:
     """Expands globs and folders, and drops anything that is not a file.
 
     A folder contributes the videos directly inside it, or every video beneath
     it with ``recursive``; ``recursive`` changes nothing for a file or a glob,
     which already say exactly what they mean. Each video appears once, at its
-    first mention.
+    first mention, however many ways the file was spelled.
     """
     videos: list[Path] = []
     for pattern in patterns:
@@ -665,7 +615,8 @@ def resolve_videos(patterns: Sequence[Path], recursive: bool = False) -> list[Pa
             videos.extend(Path(m) for m in sorted(glob.glob(str(pattern))))
         else:
             videos.append(pattern)
-    return list(dict.fromkeys(v for v in videos if v.is_file() and not _is_sidecar(v)))
+    found = [v for v in videos if v.is_file() and not _is_sidecar(v)]
+    return [found[position] for position in _first_spellings(found)]
 
 
 def plan_sampling(
@@ -675,6 +626,7 @@ def plan_sampling(
     even: bool = False,
     uniform_random: bool = False,
     counts: Sequence[int] | None = None,
+    names: Mapping[Path, str] | None = None,
 ) -> list[VideoPlan]:
     """Works out what would be sampled, without touching a single frame.
 
@@ -684,11 +636,17 @@ def plan_sampling(
     which is the expensive part and the part that does not change while a
     spinbox does, so the caller may pass counts it has already gathered.
 
+    ``names`` is what :func:`assign_names` gave each video, so a caller that
+    can see the frames folder's manifest shows the names a run would use. Left
+    out, the names are assigned as for a folder that holds nothing yet.
+
     A clip that cannot be read gets a plan with ``readable=False`` and no
     frames, rather than bringing the whole run down.
     """
     if not videos:
         raise SamplingError("No videos matched")
+    if names is None:
+        names = assign_names(videos)
 
     if counts is None:
         counts = [frame_count_or_zero(v) for v in videos]
@@ -710,7 +668,14 @@ def plan_sampling(
     for video, available, requested in zip(videos, counts, allocation):
         indices = pick(available, requested, rng) if requested else []
         plans.append(
-            VideoPlan(video, available, requested, indices, readable=available > 0)
+            VideoPlan(
+                video,
+                available,
+                requested,
+                indices,
+                readable=available > 0,
+                name=names[video],
+            )
         )
     return plans
 
@@ -838,15 +803,25 @@ def sample_frames(
     otherwise mirrors, which discards partial results: two hundred annotated
     frames are genuinely useful, an incomplete background model is not.
 
+    Frames are named after the clip, from its folders where file names are shared
+    (see :func:`assign_names`), against the clips the output folder already
+    records. Frames that exist keep their names, and one file listed twice is
+    sampled once. Two clips already recorded there under one name raise
+    :class:`SamplingError` before anything is written.
+
     Sampling into a folder that already holds frames enhanced with different
     settings raises :class:`SamplingError` unless ``force_new_enhancement``.
     """
     videos = list(videos)
     if image_format not in ("png", "jpg"):
         raise SamplingError(f"Unsupported image format {image_format!r}")
-    check_distinct_stems(videos)
-    check_against_folder(videos, output)
-    plans = plan_sampling(videos, n_frames, seed, even, uniform_random, counts)
+    keep = _first_spellings(videos)
+    if len(keep) < len(videos):  # one file listed twice is one clip
+        if counts is not None and len(counts) == len(videos):
+            counts = [counts[position] for position in keep]
+        videos = [videos[position] for position in keep]
+    names = assign_names(videos, recorded_clips(output))
+    plans = plan_sampling(videos, n_frames, seed, even, uniform_random, counts, names)
     if not force_new_enhancement:
         check_enhancement_unchanged(output, settings)
     output.mkdir(parents=True, exist_ok=True)
@@ -856,8 +831,8 @@ def sample_frames(
     # Every video gets an entry up front. An aborted run then reports zero for
     # the clips it never reached, instead of omitting them and reading as
     # though the collection were smaller than it is.
-    per_video: dict[str, int] = {plan.video.name: 0 for plan in plans}
-    unreadable: list[str] = [p.video.name for p in plans if not p.readable]
+    per_video: dict[str, int] = {plan.name: 0 for plan in plans}
+    unreadable: list[str] = [p.name for p in plans if not p.readable]
     complete = True
 
     result = SamplingResult(
@@ -887,11 +862,11 @@ def sample_frames(
                     cap.set(cv2.CAP_PROP_POS_FRAMES, index)
                     ok, frame = cap.read()
                     if not ok:
-                        unreadable.append(f"{plan.video.name}:{index}")
+                        unreadable.append(f"{plan.name}:{index}")
                         continue
 
                     image = enhance(frame)
-                    name = f"{plan.video.stem}_f{index:06d}.{image_format}"
+                    name = f"{plan.name}_f{index:06d}.{image_format}"
                     # imencode+tofile rather than imwrite, so non-ASCII paths work
                     encoded, buffer = cv2.imencode(f".{image_format}", image)
                     if not encoded:
@@ -903,14 +878,14 @@ def sample_frames(
                     records.append(
                         {
                             "file_name": name,
-                            # the stem, matching how the frames are named and how
-                            # the dataset step derives a source from a file name
-                            # when no manifest covers it; storing the name with
-                            # its extension made one clip look like two different
+                            # the name the frames carry, matching how the dataset
+                            # step derives a source from a file name when no
+                            # manifest covers it; storing the file name with its
+                            # extension made one clip look like two different
                             # recordings
-                            "source_video": plan.video.stem,
+                            "source_video": plan.name,
                             # absolute, so a later run from another directory
-                            # compares like with like in check_against_folder
+                            # finds the clip again in recorded_clips
                             "source_path": os.path.abspath(plan.video),
                             "frame_number": index,
                             "width": image.shape[1],
@@ -922,7 +897,7 @@ def sample_frames(
                         progress(len(records))
             finally:
                 cap.release()
-                per_video[plan.video.name] = written
+                per_video[plan.name] = written
             if not complete:
                 break
         finished = True

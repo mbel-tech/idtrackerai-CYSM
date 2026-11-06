@@ -104,12 +104,27 @@ def sample_main():
                 " run on. Prefer png unless disk space forces otherwise."
             )
 
+        # Names come from the frames already in the output folder, so the plan
+        # shown here is the one sample_frames will carry out.
+        on_record = sampling_mod.recorded_clips(args.output)
+        names = sampling_mod.assign_names(videos, on_record)
         plans = sampling_mod.plan_sampling(
-            videos, args.n_frames, args.seed, args.even, args.uniform_random
+            videos,
+            args.n_frames,
+            args.seed,
+            args.even,
+            args.uniform_random,
+            names=names,
         )
         print(f"\n{len(videos)} video(s), {sum(p.available for p in plans)} frames total")
         for plan in plans:
             print(f"  {plan.video.name}: taking {plan.requested} of {plan.available}")
+
+        renamed = sampling_mod.describe_renames(videos, names, on_record)
+        if renamed:
+            print("\nClips named by folder, because their file names are shared:")
+            for line in renamed:
+                print(f"  {line}")
 
         last = [0]
 
