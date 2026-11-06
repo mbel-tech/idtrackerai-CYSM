@@ -425,3 +425,153 @@ def test_the_subfolder_choice_is_explained(d2_panel):
     d2_panel.setToolTips(tips)
     assert d2_panel.include_subfolders.toolTip()
     assert "subfolder" in tips["d2_add_folder"].lower()
+    assert "same file name" not in tips["d2_include_subfolders"]
+
+
+def listed(panel) -> list[str]:
+    return [panel.video_list.item(i).text() for i in range(panel.video_list.count())]
+
+
+def counted(panel) -> None:
+    """Waits for the frame counts and lets the panel hear about them."""
+    from qtpy.QtWidgets import QApplication
+
+    panel.count_thread.wait(30000)
+    QApplication.processEvents()
+
+
+def test_clips_sharing_a_file_name_are_listed_by_their_folder_name(d2_panel, tmp_path):
+    d2_panel.set_video_paths(
+        [
+            make_video(tmp_path / "day1" / "cam1.avi"),
+            make_video(tmp_path / "day2" / "cam1.avi"),
+            make_video(tmp_path / "other" / "cam2.avi"),
+        ]
+    )
+    assert listed(d2_panel) == [
+        "day1-cam1  (cam1.avi)",
+        "day2-cam1  (cam1.avi)",
+        "cam2.avi",
+    ]
+
+
+def test_the_summary_counts_recordings_by_name(d2_panel, tmp_path):
+    d2_panel.set_video_paths(
+        [
+            make_video(tmp_path / "day1" / "cam1.avi"),
+            make_video(tmp_path / "day2" / "cam1.avi"),
+        ]
+    )
+    assert "2 recordings" in d2_panel.video_summary.text()
+
+
+def test_the_preview_says_how_many_are_named_by_folder(d2_panel, tmp_path):
+    d2_panel.set_video_paths(
+        [
+            make_video(tmp_path / "day1" / "cam1.avi"),
+            make_video(tmp_path / "day2" / "cam1.avi"),
+        ]
+    )
+    counted(d2_panel)
+    assert "2 clips will be named by folder" in d2_panel.sample_preview.text()
+
+
+def test_the_output_folder_decides_what_is_already_taken(d2_panel, tmp_path):
+    day1 = make_video(tmp_path / "day1" / "cam1.avi")
+    day2 = make_video(tmp_path / "day2" / "cam1.avi")
+    out = tmp_path / "frames"
+    sample([day1], out)  # recorded as plain cam1, before day2 was in the picture
+
+    d2_panel.set_video_paths([day1, day2])
+    assert listed(d2_panel) == ["day1-cam1  (cam1.avi)", "day2-cam1  (cam1.avi)"]
+
+    d2_panel.frames_dir.setText(str(out))
+
+    assert listed(d2_panel) == ["cam1.avi", "day2-cam1  (cam1.avi)"]
+    assert d2_panel.clip_names() == {day1: "cam1", day2: "day2-cam1"}
+
+    d2_panel.frames_dir.setText("")  # nothing is on record without a folder
+
+    assert listed(d2_panel) == ["day1-cam1  (cam1.avi)", "day2-cam1  (cam1.avi)"]
+
+
+def test_a_frames_folder_that_repeats_a_name_does_not_break_the_list(
+    d2_panel, tmp_path
+):
+    day1 = make_video(tmp_path / "day1" / "cam1.avi")
+    day2 = make_video(tmp_path / "day2" / "cam1.avi")
+    out = tmp_path / "frames"
+    records = []
+    for index, clip in enumerate((day1, day2), start=1):
+        file_name = f"cam1_f{index:06d}.png"
+        touch(out / file_name)
+        records.append(
+            {"file_name": file_name, "source_video": "cam1", "source_path": str(clip)}
+        )
+    (out / "sampling_manifest.json").write_text(
+        json.dumps({"frames": records}), encoding="utf-8"
+    )
+    d2_panel.set_video_paths([day1, day2])
+
+    d2_panel.frames_dir.setText(str(out))  # a run would refuse; the list must not
+
+    assert listed(d2_panel) == ["day1-cam1  (cam1.avi)", "day2-cam1  (cam1.avi)"]
+
+
+def test_a_clip_that_cannot_be_found_is_marked_under_its_name(d2_panel, tmp_path):
+    d2_panel.set_video_paths(
+        [
+            make_video(tmp_path / "day1" / "cam1.avi"),
+            tmp_path / "day2" / "cam1.avi",  # not there
+        ]
+    )
+    assert listed(d2_panel) == [
+        "day1-cam1  (cam1.avi)",
+        "day2-cam1  (cam1.avi)  (missing)",
+    ]
+
+
+def test_without_an_output_folder_no_manifest_is_read(d2_panel, tmp_path, monkeypatch):
+    day1 = make_video(tmp_path / "day1" / "cam1.avi")
+    day2 = make_video(tmp_path / "day2" / "cam1.avi")
+    elsewhere = tmp_path / "somewhere_else"
+    touch(elsewhere / "cam1_f000001.png")
+    records = [
+        {
+            "file_name": "cam1_f000001.png",
+            "source_video": "cam1",
+            "source_path": str(day1),
+        }
+    ]
+    (elsewhere / "sampling_manifest.json").write_text(
+        json.dumps({"frames": records}), encoding="utf-8"
+    )
+    monkeypatch.chdir(elsewhere)
+    assert d2_panel.frames_dir.text() == ""
+
+    d2_panel.set_video_paths([day2])
+
+    assert listed(d2_panel) == ["cam1.avi"]
+    assert d2_panel.clip_names() == {day2: "cam1"}
+
+
+def test_the_grouping_editor_shows_the_names(d2_panel, tmp_path, monkeypatch):
+    from qtpy.QtWidgets import QDialog, QTableWidget
+
+    d2_panel.set_video_paths(
+        [
+            make_video(tmp_path / "day1" / "cam1.avi"),
+            make_video(tmp_path / "day2" / "cam1.avi"),
+        ]
+    )
+    shown: list[str] = []
+
+    def look(dialog):
+        table = dialog.findChild(QTableWidget)
+        shown.extend(table.item(row, 0).text() for row in range(table.rowCount()))
+        return QDialog.DialogCode.Rejected
+
+    monkeypatch.setattr(QDialog, "exec", look)
+    d2_panel.edit_grouping()
+
+    assert shown == ["day1-cam1", "day2-cam1"]

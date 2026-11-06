@@ -64,6 +64,7 @@ from idtrackerai.extra_tools.detectron2_pipeline import prep_state as prep_state
 from idtrackerai.extra_tools.detectron2_pipeline import preprocessing as fp
 from idtrackerai.extra_tools.detectron2_pipeline import sampling as sampling_mod
 from idtrackerai.extra_tools.detectron2_pipeline import segmentation_model as sm
+from idtrackerai.extra_tools.detectron2_pipeline.errors import SamplingError
 from idtrackerai.GUI_tools import WrappedLabel
 
 from .enhancement_widget import EnhancementWidget
@@ -96,6 +97,8 @@ class Detectron2Panel(QWidget):
         self._counts: dict[Path, int] = {}
         self._count_keys: dict[Path, tuple] = {}
         self._pending_counts: set[Path] = set()
+        # What each listed clip's frames are called; see _refresh_names
+        self._names: dict[Path, str] = {}
 
         self.sampling_thread = SamplingThread()
         self.dataset_thread = DatasetThread()
@@ -140,6 +143,9 @@ class Detectron2Panel(QWidget):
         self._update_export_command()
         self._fit_to_open_step()
         self.check_gpu()
+        # Last, because setText is called while the pages are built and from
+        # saved state, and the handler needs every page to exist
+        self.frames_dir.textChanged.connect(self._output_folder_changed)
 
     def _fit_to_open_step(self) -> None:
         """Ask for the height the open step actually needs.
@@ -389,18 +395,19 @@ class Detectron2Panel(QWidget):
             "split. Edit the group of any clip that was guessed wrongly; "
             "clearing a cell restores the guess."
         )
+        names = self.clip_names()
         table = QTableWidget(len(videos), 2)
         table.setHorizontalHeaderLabels(["Clip", "Group"])
         table.verticalHeader().setVisible(False)
         table.horizontalHeader().setStretchLastSection(True)
         for row, video in enumerate(videos):
-            stem = video.stem
-            name = QTableWidgetItem(stem)
+            clip = names[video]
+            name = QTableWidgetItem(clip)
             name.setFlags(name.flags() & ~Qt.ItemFlag.ItemIsEditable)
             table.setItem(row, 0, name)
             table.setItem(
                 row, 1,
-                QTableWidgetItem(dataset_mod.group_of(stem, overrides, mode)),
+                QTableWidgetItem(dataset_mod.group_of(clip, overrides, mode)),
             )
         table.resizeColumnsToContents()
 
@@ -423,10 +430,10 @@ class Detectron2Panel(QWidget):
         # later still benefits anyone who did not have to correct it.
         new_overrides: dict[str, str] = {}
         for row, video in enumerate(videos):
-            stem = video.stem
+            clip = names[video]
             chosen = (table.item(row, 1).text() or "").strip()
-            if chosen and chosen != dataset_mod.group_of(stem, None, mode):
-                new_overrides[stem] = chosen
+            if chosen and chosen != dataset_mod.group_of(clip, None, mode):
+                new_overrides[clip] = chosen
         if self.state is not None:
             self.state.group_overrides = new_overrides
             self.state.save()
@@ -448,8 +455,9 @@ class Detectron2Panel(QWidget):
             self.grouping_status.setText("Add videos to see how they group.")
             return
 
+        names = self.clip_names()
         groups = dataset_mod.group_videos(
-            [v.stem for v in videos],
+            [names[v] for v in videos],
             self.state.group_overrides if self.state else None,
             mode,
         )
@@ -805,21 +813,62 @@ class Detectron2Panel(QWidget):
 
         self.video_list.clear()
         for path in unique:
-            item = QListWidgetItem(path.name)
+            item = QListWidgetItem()
             item.setData(Qt.ItemDataRole.UserRole, str(path))
-            if path.is_file():
-                item.setToolTip(str(path))
-            else:
-                # kept rather than dropped: an unplugged drive should not
-                # quietly empty a list the user spent time building
-                item.setText(f"{path.name}  (missing)")
-                item.setToolTip(f"{path} - not found right now")
             self.video_list.addItem(item)
+        self._refresh_names()
+        self._relabel_videos()
 
         if self.state is not None:
             self.state.set_videos(unique)
             self.state.save()
         self._start_counting(unique)
+        self._update_video_summary()
+        self._update_grouping_status()
+        self._schedule_preview()
+
+    def clip_names(self) -> dict[Path, str]:
+        """What each listed clip's frames are called: the cached ``_refresh_names``."""
+        return self._names
+
+    def _refresh_names(self) -> None:
+        """Works the names out again, from the list and the output folder.
+
+        The frames folder's manifest decides, because frames that exist keep
+        their names. With no folder chosen yet nothing is recorded: an empty
+        text would otherwise be read as the working directory, whose manifest
+        belongs to something else.
+        """
+        videos = self.video_paths
+        folder = self.frames_dir.text()
+        recorded = sampling_mod.recorded_clips(Path(folder)) if folder else []
+        try:
+            self._names = sampling_mod.assign_names(videos, recorded)
+        except SamplingError:
+            # The folder records different clips under one name. A run says so
+            # and stops; until then the list and the preview should still work.
+            self._names = sampling_mod.assign_names(videos)
+
+    def _relabel_videos(self) -> None:
+        """Shows each clip under its name, and which ones cannot be found."""
+        for row in range(self.video_list.count()):
+            item = self.video_list.item(row)
+            path = Path(item.data(Qt.ItemDataRole.UserRole))
+            name = self._names[path]
+            label = path.name if name == path.stem else f"{name}  ({path.name})"
+            if path.is_file():
+                item.setText(label)
+                item.setToolTip(str(path))
+            else:
+                # kept rather than dropped: an unplugged drive should not
+                # quietly empty a list the user spent time building
+                item.setText(f"{label}  (missing)")
+                item.setToolTip(f"{path} - not found right now")
+
+    def _output_folder_changed(self, _text: str) -> None:
+        """The frames folder decides which names are already taken."""
+        self._refresh_names()
+        self._relabel_videos()
         self._update_video_summary()
         self._update_grouping_status()
         self._schedule_preview()
@@ -917,8 +966,9 @@ class Detectron2Panel(QWidget):
             )
             return
 
+        names = self.clip_names()
         groups = dataset_mod.group_videos(
-            [v.stem for v in videos],
+            [names[v] for v in videos],
             self.state.group_overrides if self.state else None,
             self.state.group_by if self.state else "recording",
         )
@@ -964,7 +1014,11 @@ class Detectron2Panel(QWidget):
 
         try:
             plans = sampling_mod.plan_sampling(
-                videos, self.n_frames.value(), self.seed.value(), counts=counts
+                videos,
+                self.n_frames.value(),
+                self.seed.value(),
+                counts=counts,
+                names=self.clip_names(),
             )
         except Exception as exc:  # noqa: BLE001 - a preview must never raise
             self.sample_preview.setText(f"Cannot plan this yet: {exc}")
@@ -990,6 +1044,12 @@ class Detectron2Panel(QWidget):
             text += (
                 f" {len(empty)} videos would get no frames at all - raise the"
                 " count to at least one per video."
+            )
+        renamed = sum(1 for p in plans if p.name != p.video.stem)
+        if renamed:
+            text += (
+                f" {renamed} {'clip' if renamed == 1 else 'clips'} will be named"
+                " by folder, because file names are shared."
             )
         self.sample_preview.setText(text)
 
@@ -1048,6 +1108,8 @@ class Detectron2Panel(QWidget):
         self.sampling_thread.start()
 
     def _sampling_finished(self) -> None:
+        # the run recorded its names in the manifest, which now decides them
+        self._refresh_names()
         self.sample_button.setEnabled(True)
         result = self.sampling_thread.result
         if result is None:
