@@ -266,8 +266,10 @@ own list of videos.
 
 ![The sampling step: a list of clips, a summary reading how many videos and recordings, and a line predicting the per-clip allocation](docs/images/app-detectron2-sample.png)
 
-**Add folder...** takes every clip from a setup; **Use open videos** takes the
-ones already loaded. The summary underneath counts them — in the picture,
+**Add folder...** takes every clip from a setup, and with **Include subfolders**
+ticked every clip beneath it too, so a whole experiment is one click; **Use open
+videos** takes the ones already loaded. The frame count is a total for the whole
+list, shared out in proportion to clip length. The summary underneath counts them — in the picture,
 *4 videos, 1 recording, 119,350 frames* — and above the **Sample frames**
 button a line says what the run would do before it does it: *600 frames from
 4 of 4 videos, 150 each*.

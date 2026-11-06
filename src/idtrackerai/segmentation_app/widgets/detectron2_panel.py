@@ -32,6 +32,7 @@ from qtpy.QtGui import QDesktopServices
 from qtpy.QtWidgets import (
     QAbstractItemView,
     QApplication,
+    QCheckBox,
     QComboBox,
     QDialog,
     QDialogButtonBox,
@@ -190,6 +191,10 @@ class Detectron2Panel(QWidget):
         self.add_videos_button.clicked.connect(self.add_videos)
         self.add_folder_button = QPushButton("Add folder...")
         self.add_folder_button.clicked.connect(self.add_video_folder)
+        # Off by default: a folder of clips and a folder of whole experiments
+        # look the same until you open them, and taking every video beneath the
+        # wrong one is a bigger mistake than having to tick a box.
+        self.include_subfolders = QCheckBox("Include subfolders")
         self.remove_videos_button = QPushButton("Remove")
         self.remove_videos_button.clicked.connect(self.remove_selected_videos)
         self.reset_videos_button = QPushButton("Use open videos")
@@ -250,6 +255,7 @@ class Detectron2Panel(QWidget):
         layout.addWidget(self.video_list_label)
         layout.addWidget(self.video_list)
         layout.addLayout(video_buttons)
+        layout.addWidget(self.include_subfolders)
         layout.addWidget(self.video_summary)
         layout.addLayout(form)
         layout.addWidget(self.sample_preview)
@@ -834,17 +840,26 @@ class Detectron2Panel(QWidget):
         )
         if not folder:
             return
-        found: list[Path] = []
-        for suffix in ("mp4", "avi", "mov", "mkv", "mpg", "mpeg", "wmv", "m4v"):
-            # resolve_videos drops the macOS "._" companions that otherwise
-            # arrive as unreadable videos
-            found += sampling_mod.resolve_videos([Path(folder) / f"*.{suffix}"])
+        recursive = self.include_subfolders.isChecked()
+        # a deep tree on a network drive takes a moment to walk
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            # drops the macOS "._" companions that otherwise arrive as
+            # unreadable videos, and hidden folders such as .Trash
+            found = sampling_mod.videos_in_folder(Path(folder), recursive)
+        finally:
+            QApplication.restoreOverrideCursor()
         if not found:
+            hint = (
+                " or its subfolders"
+                if recursive
+                else ". Tick “Include subfolders” to look inside them too"
+            )
             QMessageBox.information(
-                self, "No videos there", f"No video files were found in {folder}."
+                self, "No videos there", f"No video files were found in {folder}{hint}."
             )
             return
-        self.set_video_paths(self.video_paths + sorted(found))
+        self.set_video_paths(self.video_paths + found)
 
     def remove_selected_videos(self) -> None:
         rows = {index.row() for index in self.video_list.selectedIndexes()}
@@ -1418,7 +1433,7 @@ class Detectron2Panel(QWidget):
         self.train_process.kill()
 
     # ------------------------------------------------------------- step 6 run
-    VIDEO_SUFFIXES = (".mp4", ".avi", ".mov", ".mkv", ".mpg", ".mpeg", ".wmv", ".m4v")
+    VIDEO_SUFFIXES = sampling_mod.VIDEO_SUFFIXES
 
     def _export_target(self, videos) -> tuple[str, str]:
         """The ``--videos`` argument, and a phrase describing what it covers.
@@ -1547,6 +1562,7 @@ class Detectron2Panel(QWidget):
             (self.video_list_label, "d2_video_list"),
             (self.add_videos_button, "d2_add_videos"),
             (self.add_folder_button, "d2_add_folder"),
+            (self.include_subfolders, "d2_include_subfolders"),
             (self.remove_videos_button, "d2_remove_videos"),
             (self.reset_videos_button, "d2_reset_videos"),
             (self.video_summary, "d2_video_list"),

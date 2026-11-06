@@ -32,10 +32,27 @@ def sample_main():
         description="Sample frames from videos for LabelMe annotation",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument("--videos", type=Path, nargs="+", required=True)
+    parser.add_argument(
+        "--videos",
+        type=Path,
+        nargs="+",
+        required=True,
+        help=(
+            "video files, globs, or folders; a folder contributes the videos "
+            "directly inside it (see --recursive)"
+        ),
+    )
+    parser.add_argument(
+        "--recursive",
+        action="store_true",
+        help="for each folder given to --videos, also use every video in its subfolders",
+    )
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument(
-        "--n-frames", type=int, required=True, help="total frames across all videos"
+        "--n-frames",
+        type=int,
+        required=True,
+        help="total frames across all videos, not per video",
     )
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument(
@@ -66,7 +83,7 @@ def sample_main():
     args = parser.parse_args()
 
     try:
-        videos = sampling_mod.resolve_videos(args.videos)
+        videos = sampling_mod.resolve_videos(args.videos, recursive=args.recursive)
         if not videos:
             raise SamplingError(f"No videos matched {args.videos}")
 
