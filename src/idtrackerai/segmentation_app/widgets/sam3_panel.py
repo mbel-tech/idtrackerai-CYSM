@@ -47,6 +47,7 @@ from qtpy.QtWidgets import (
 )
 
 from idtrackerai.extra_tools.detectron2_pipeline import gpu as gpu_mod
+from idtrackerai.extra_tools.detectron2_pipeline import sampling as sampling_mod
 from idtrackerai.extra_tools.detectron2_pipeline import segmentation_model as sm
 from idtrackerai.GUI_tools import WrappedLabel
 
@@ -365,6 +366,21 @@ class Sam3Panel(QWidget):
 
     def run_export(self) -> None:
         if self.weights is None or not self.video_paths:
+            return
+        # contour files are named for the clip's file name, so two clips with one
+        # would write the same file and the second be skipped as already done
+        shared = sampling_mod.repeated_stems(self.video_paths)
+        if shared:
+            lines = "\n".join(
+                f"{stem}: {', '.join(str(p) for p in paths)}"
+                for stem, paths in shared.items()
+            )
+            QMessageBox.warning(
+                self,
+                "Clips share a file name",
+                "Two videos would write the same contour file (same file name in"
+                f" different folders). Export them separately.\n\n{lines}",
+            )
             return
         output_dir = self.export_dir()
         output_dir.mkdir(parents=True, exist_ok=True)

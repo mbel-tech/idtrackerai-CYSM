@@ -594,3 +594,25 @@ def test_the_grouping_editor_shows_the_names(d2_panel, tmp_path, monkeypatch):
     d2_panel.edit_grouping()
 
     assert shown == ["day1-cam1", "day2-cam1"]
+
+
+def test_the_export_step_warns_before_the_command_is_copied(d2_panel, tmp_path):
+    d2_panel.set_video_paths(
+        [
+            make_video(tmp_path / "day1" / "cam1.avi"),
+            make_video(tmp_path / "day2" / "cam1.avi"),
+        ]
+    )
+    d2_panel._update_export_command()
+    text = d2_panel.export_status.text()
+    assert text.startswith("2 clips share a file name")
+    assert "will refuse" in text
+
+    d2_panel.set_video_paths(
+        [
+            make_video(tmp_path / "day1" / "cam1.avi"),
+            make_video(tmp_path / "day2" / "cam2.avi"),
+        ]
+    )
+    d2_panel._update_export_command()
+    assert "will refuse" not in d2_panel.export_status.text()

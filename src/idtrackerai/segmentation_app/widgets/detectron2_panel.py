@@ -1563,8 +1563,19 @@ class Detectron2Panel(QWidget):
             if self.gpu.usable
             else "This machine cannot run it; the Colab notebook can."
         )
+        # the exporter names a contour file for the clip's file name and stops
+        # when two clips would write one; say so now, not after the copy
+        shared = sampling_mod.repeated_stems(videos)
+        clashing = sum(len(paths) for paths in shared.values())
+        warning = (
+            f"{clashing} clips share a file name, so the exporter will refuse "
+            "this list; export them in separate runs. "
+            if clashing
+            else ""
+        )
         self.export_status.setText(
-            f"This exports {scope}. Running the model over every frame takes "
+            warning
+            + f"This exports {scope}. Running the model over every frame takes "
             "roughly an hour per 30 000-frame clip, so a collection takes "
             "days. It is not run from here: copy the command and run it in a "
             "terminal you can leave open. It writes one file per clip and "
