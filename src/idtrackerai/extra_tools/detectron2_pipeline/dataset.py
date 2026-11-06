@@ -162,6 +162,47 @@ def source_video_of(file_name: str, manifest: dict | None) -> str:
     return normalise_source(stem)
 
 
+def _recorded_frames(manifest_path: Path) -> dict | None:
+    """The manifest's frames by file name, or None when it cannot be trusted.
+
+    The preview must never be the thing that fails, so a manifest that is
+    missing, unreadable or the wrong shape is simply not used. Entries that do
+    not name their source are left out, and those frames fall back to their
+    file names like frames with no manifest at all.
+    """
+    try:
+        data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    frames = data.get("frames") if isinstance(data, dict) else None
+    if not isinstance(frames, list):
+        return None
+    return {
+        entry["file_name"]: entry
+        for entry in frames
+        if isinstance(entry, dict)
+        and isinstance(entry.get("file_name"), str)
+        and isinstance(entry.get("source_video"), str)
+    }
+
+
+def sources_in_folder(input_dir: Path) -> list[str]:
+    """The clips a folder of frames came from, as the split will see them.
+
+    Each image is named by the manifest when it records the frame, else by its
+    file name, exactly as ``build_coco_dataset`` does. Feed the result to
+    ``group_videos`` to preview the grouping before anything is built.
+    """
+    manifest = _recorded_frames(input_dir / "sampling_manifest.json")
+    return sorted(
+        {
+            source_video_of(path.name, manifest)
+            for path in input_dir.iterdir()
+            if path.suffix.lower() in IMAGE_SUFFIXES and path.is_file()
+        }
+    )
+
+
 def group_key(stem: str) -> str:
     """The recording a clip belongs to: B3_N1_segment_3 -> B3_N1.
 
