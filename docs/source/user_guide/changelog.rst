@@ -120,7 +120,19 @@ Segmentation changes
   name, before writing anything, as the command-line exporter and the session
   loader already did: contour files are named for the video's file name, so the
   second clip would otherwise be skipped as already done. The Detectron2 export
-  step warns about it before the command is copied.
+  step warns about it before the command is copied, and refreshes that warning
+  whenever the list of clips changes.
+- Sampling stops, before writing anything, when a frame it would write already
+  exists in the folder without the manifest recording it as coming from the same
+  video (for example after ``sampling_manifest.json`` was deleted), rather than
+  overwriting another clip's frame.
+- A source path recorded as relative (older versions) or written on another
+  computer is ignored when working out which clips a frames folder already
+  holds, so sampling the same clip again from another directory no longer
+  records it a second time under a folder-based name.
+- ``SamplingResult.per_video`` is keyed by the clip's name (its file name
+  without the extension, unless file names are shared) rather than by its file
+  name, and ``unreadable`` lists clips by name as well.
 - Training and contour export are steps in the Segmentation App, not only
   instructions to go elsewhere. The panel checks whether this machine has a
   CUDA GPU and Detectron2; when it does, training runs here as a managed

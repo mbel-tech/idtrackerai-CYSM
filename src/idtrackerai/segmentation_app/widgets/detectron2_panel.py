@@ -99,6 +99,7 @@ class Detectron2Panel(QWidget):
         self._pending_counts: set[Path] = set()
         # What each listed clip's frames are called; see _refresh_names
         self._names: dict[Path, str] = {}
+        self._names_problem = ""  # why the output folder cannot be sampled into
 
         self.sampling_thread = SamplingThread()
         self.dataset_thread = DatasetThread()
@@ -802,21 +803,20 @@ class Detectron2Panel(QWidget):
         ]
 
     def set_video_paths(self, paths) -> None:
-        """Replaces the list, dropping duplicates but keeping the order given."""
-        unique: list[Path] = []
-        seen = set()
-        for path in paths:
-            path = Path(path)
-            if path not in seen:
-                seen.add(path)
-                unique.append(path)
+        """Replaces the list, dropping duplicates but keeping the order given.
 
-        self.video_list.clear()
-        for path in unique:
-            item = QListWidgetItem()
-            item.setData(Qt.ItemDataRole.UserRole, str(path))
-            self.video_list.addItem(item)
-        self._refresh_names()
+        One file under two spellings counts once, as it does in a sampling run.
+        """
+        with sampling_mod.locations_cached():  # each path is resolved once
+            listed = [Path(path) for path in paths]
+            unique = [listed[i] for i in sampling_mod._first_spellings(listed)]
+
+            self.video_list.clear()
+            for path in unique:
+                item = QListWidgetItem()
+                item.setData(Qt.ItemDataRole.UserRole, str(path))
+                self.video_list.addItem(item)
+            self._refresh_names()
         self._relabel_videos()
 
         if self.state is not None:
@@ -826,6 +826,7 @@ class Detectron2Panel(QWidget):
         self._update_video_summary()
         self._update_grouping_status()
         self._schedule_preview()
+        self._update_export_command()  # which clips share a file name has changed
 
     def clip_names(self) -> dict[Path, str]:
         """What each listed clip's frames are called: the cached ``_refresh_names``."""
@@ -842,11 +843,14 @@ class Detectron2Panel(QWidget):
         videos = self.video_paths
         folder = self.frames_dir.text()
         recorded = sampling_mod.recorded_clips(Path(folder)) if folder else []
+        self._names_problem = ""
         try:
             self._names = sampling_mod.assign_names(videos, recorded)
-        except SamplingError:
+        except SamplingError as exc:
             # The folder records different clips under one name. A run says so
-            # and stops; until then the list and the preview should still work.
+            # and stops; until then the list should still work, and the preview
+            # says what the run will say.
+            self._names_problem = str(exc)
             self._names = sampling_mod.assign_names(videos)
 
     def _relabel_videos(self) -> None:
@@ -1006,6 +1010,9 @@ class Detectron2Panel(QWidget):
         if not videos:
             self.sample_preview.setText("")
             return
+        if self._names_problem:
+            self.sample_preview.setText(f"Cannot plan this yet: {self._names_problem}")
+            return
 
         counts = [self._counts.get(v) for v in videos]
         if any(c is None for c in counts):
@@ -1108,11 +1115,14 @@ class Detectron2Panel(QWidget):
         self.sampling_thread.start()
 
     def _sampling_finished(self) -> None:
-        # The run recorded its names in the manifest, which now decides them.
-        # The list can be edited while it works, so everything that shows a
-        # name is brought up to date, not only the cache.
-        self._output_folder_changed(self.frames_dir.text())
         self.sample_button.setEnabled(True)
+        try:
+            # The run recorded its names in the manifest, which now decides them.
+            # The list can be edited while it works, so everything that shows a
+            # name is brought up to date, not only the cache.
+            self._output_folder_changed(self.frames_dir.text())
+        except Exception:  # noqa: BLE001 - the run's result matters more than this
+            logging.exception("Could not refresh the clip names after sampling")
         result = self.sampling_thread.result
         if result is None:
             self.refresh()

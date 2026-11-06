@@ -19,7 +19,9 @@ import json
 import os
 import random
 import re
+import threading
 from collections.abc import Callable, Mapping, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path, PurePath
@@ -84,7 +86,12 @@ class SamplingResult:
     manifest_path: Path | None = None
     profile_path: Path | None = None
     per_video: dict[str, int] = field(default_factory=dict)
+    """Frames written for each clip, keyed by the clip's name (what its frames
+    are called), which is its file name without the extension unless file names
+    are shared."""
     unreadable: list[str] = field(default_factory=list)
+    """Clips that could not be read, by name, and frames that could not be
+    decoded, as ``name:index``."""
     complete: bool = True
 
     @property
@@ -109,9 +116,54 @@ def frame_count_or_zero(path: Path) -> int:
         return 0
 
 
+_scope = threading.local()
+
+
+@contextmanager
+def locations_cached():
+    """Resolves where each path really is once, for everything in the block.
+
+    De-duplicating, naming and planning each ask where every clip is, and every
+    answer costs a ``stat`` per folder level: quick on a local disk, slow on a
+    network share. Blocks nest; the outermost owns the cache, and it is per
+    thread, so a run in the background cannot disturb the window's own calls.
+    """
+    owner = getattr(_scope, "cache", None) is None
+    if owner:
+        _scope.cache = {}
+    try:
+        yield
+    finally:
+        if owner:
+            _scope.cache = None
+
+
 def _location(path) -> str:
     """A path in a form two spellings of the same file agree on."""
-    return os.path.normcase(os.path.realpath(path))
+    cache = getattr(_scope, "cache", None)
+    key = os.path.abspath(path)
+    if cache is not None and key in cache:
+        return cache[key]
+    found = os.path.normcase(os.path.realpath(key))
+    if cache is not None:
+        cache[key] = found
+    return found
+
+
+def _file_name_of(path: str) -> str:
+    """The last part of a path written on any system (``/`` or ``\\`` between parts)."""
+    return re.split(r"[\\/]", path)[-1]
+
+
+def _manifest_records(output: Path) -> list:
+    """The frame records of a folder's manifest; none if it is missing or unreadable."""
+    try:
+        records = json.loads(
+            (output / "sampling_manifest.json").read_text(encoding="utf-8")
+        ).get("frames", [])
+    except (OSError, ValueError, AttributeError):
+        return []
+    return records if isinstance(records, list) else []
 
 
 def recorded_clips(output: Path) -> list[tuple[str, str]]:
@@ -124,22 +176,17 @@ def recorded_clips(output: Path) -> list[tuple[str, str]]:
     of its frames remain, and costs about one ``stat`` to confirm.
 
     A record with no source path (written before paths were kept) cannot say
-    which clip it came from. A manifest that is missing, unreadable or the wrong
-    shape says nothing at all. Neither objects: they are skipped. A
-    ``source_video`` that carries a video extension is read as the stem it
-    stands for, since that is the spelling older manifests used.
+    which clip it came from. Neither can one whose path is not absolute here: a
+    relative path as an older version typed it, or one written on another
+    machine or system, resolves against whatever directory happens to be current
+    and so matches no file, and counting it would make the clip it describes
+    look like a different one. A manifest that is missing, unreadable or the
+    wrong shape says nothing at all. None of these objects: they are skipped. A
+    ``source_video`` that is the file's own name, extension included, is read as
+    the stem it stands for, since that is the spelling older manifests used.
     """
-    try:
-        records = json.loads(
-            (output / "sampling_manifest.json").read_text(encoding="utf-8")
-        ).get("frames", [])
-    except (OSError, ValueError, AttributeError):
-        return []
-    if not isinstance(records, list):
-        return []
-
     held: dict[tuple[str, str], None] = {}
-    for record in records:
+    for record in _manifest_records(output):
         if not isinstance(record, dict):
             continue
         file_name = record.get("file_name")
@@ -154,10 +201,10 @@ def recorded_clips(output: Path) -> list[tuple[str, str]]:
             and path
         ):
             continue
-        for suffix in VIDEO_SUFFIXES:
-            if name.lower().endswith(suffix):
-                name = name[: -len(suffix)]
-                break
+        if not os.path.isabs(path):
+            continue
+        if name == _file_name_of(path):  # the old spelling kept the extension
+            name = os.path.splitext(name)[0]
         if (path, name) in held:
             continue
         try:
@@ -360,14 +407,16 @@ def assign_names(
     a name). Listing either one would then write over the other's frames, so
     that raises :class:`SamplingError`, whichever of them are listed.
     """
-    survey = _survey(videos, recorded)
+    with locations_cached():
+        survey = _survey(videos, recorded)
     new, held, taken = survey.new, survey.held, survey.taken
 
     on_record: dict[str, str] = {}  # folder -> the prefix its clips were given
     for clip, name in held.values():
-        tail = f"-{clip.stem}"
-        if len(name) > len(tail) and name.endswith(tail):
-            on_record.setdefault(clip.folder, name[: -len(tail)])
+        # <prefix>-<stem>, or <prefix>-<stem>-<n> when numbering finished the job
+        found = re.fullmatch(rf"(.+)-{re.escape(clip.stem)}(?:-\d+)?", name)
+        if found:
+            on_record.setdefault(clip.folder, found.group(1))
 
     members: dict[str, list[_Clip]] = {}
     for clip in new.values():
@@ -441,7 +490,8 @@ def describe_renames(
     clip in that folder that does have one. Nothing renamed gives ``[]``. A clip
     listed twice under different spellings is described once.
     """
-    survey = _survey(videos, recorded)
+    with locations_cached():
+        survey = _survey(videos, recorded)
 
     mates: dict[str, _Clip] = {}  # folder -> its first clip that shares a name
     for group in survey.stems.values():
@@ -473,8 +523,10 @@ def describe_renames(
                 f"{video} -> {name}  (same folder as {mate.path},"
                 " which shares a file name)"
             )
-        else:  # named after clips already on record, which are not shown here
-            lines.append(f"{video} -> {name}")
+        else:  # the name it would have had is used by a clip not shown here
+            lines.append(
+                f"{video} -> {name}  (the name {clip.stem} is already used by another clip)"
+            )
     return lines
 
 
@@ -757,6 +809,57 @@ def check_enhancement_unchanged(output: Path, settings: dict) -> None:
         )
 
 
+def check_frames_are_free(
+    plans: Sequence[VideoPlan], output: Path, image_format: str
+) -> None:
+    """Refuses to write a frame over one that is not recorded as this clip's.
+
+    Names keep different clips apart only through the manifest. Where it is
+    missing, or does not say where a frame came from, an existing frame of the
+    same name could belong to another clip, and writing over it would destroy
+    that frame and leave any annotation drawn on it describing a different image.
+    A clip's own frames are always fine to write again. A record whose path
+    cannot be matched (relative, or written on another system) gets the benefit
+    of the doubt when it names the same file.
+    """
+    if not output.is_dir():
+        return
+    sources: dict[str, str] = {}  # frame file name -> the path recorded for it
+    for record in _manifest_records(output):
+        if (
+            isinstance(record, dict)
+            and isinstance(record.get("file_name"), str)
+            and isinstance(record.get("source_path"), str)
+        ):
+            sources[record["file_name"]] = record["source_path"]
+
+    clashes: list[str] = []
+    for plan in plans:
+        for index in plan.indices:
+            file_name = f"{plan.name}_f{index:06d}.{image_format}"
+            if not (output / file_name).exists():
+                continue
+            recorded = sources.get(file_name)
+            if recorded is not None and (
+                _location(recorded) == _location(plan.video)
+                or (
+                    not os.path.isabs(recorded)
+                    and _file_name_of(recorded) == plan.video.name
+                )
+            ):
+                continue
+            clashes.append(file_name)
+    if clashes:
+        raise SamplingError(
+            f"{len(clashes)} frame(s) this run would write already exist in"
+            f" {output} and are not recorded there as coming from the same video"
+            f" (for example {clashes[0]}), so writing them could overwrite another"
+            " clip's frames. That happens when sampling_manifest.json was deleted"
+            " or never recorded where a frame came from. Sample into a new frames"
+            " folder, or restore the manifest."
+        )
+
+
 def _merge_manifest(path: Path, manifest: dict, output: Path) -> dict:
     """Folds a new batch into whatever the folder already recorded.
 
@@ -841,7 +944,8 @@ def sample_frames(
     (see :func:`assign_names`), against the clips the output folder already
     records. Frames that exist keep their names, and one file listed twice is
     sampled once. Two clips already recorded there under one name raise
-    :class:`SamplingError` before anything is written.
+    :class:`SamplingError` before anything is written, and so does a frame that
+    already exists there without being recorded as this clip's.
 
     Sampling into a folder that already holds frames enhanced with different
     settings raises :class:`SamplingError` unless ``force_new_enhancement``.
@@ -849,13 +953,17 @@ def sample_frames(
     videos = list(videos)
     if image_format not in ("png", "jpg"):
         raise SamplingError(f"Unsupported image format {image_format!r}")
-    keep = _first_spellings(videos)
-    if len(keep) < len(videos):  # one file listed twice is one clip
-        if counts is not None and len(counts) == len(videos):
-            counts = [counts[position] for position in keep]
-        videos = [videos[position] for position in keep]
-    names = assign_names(videos, recorded_clips(output))
-    plans = plan_sampling(videos, n_frames, seed, even, uniform_random, counts, names)
+    with locations_cached():  # each path is resolved once for all of this
+        keep = _first_spellings(videos)
+        if len(keep) < len(videos):  # one file listed twice is one clip
+            if counts is not None and len(counts) == len(videos):
+                counts = [counts[position] for position in keep]
+            videos = [videos[position] for position in keep]
+        names = assign_names(videos, recorded_clips(output))
+        plans = plan_sampling(
+            videos, n_frames, seed, even, uniform_random, counts, names
+        )
+        check_frames_are_free(plans, output, image_format)
     if not force_new_enhancement:
         check_enhancement_unchanged(output, settings)
     output.mkdir(parents=True, exist_ok=True)

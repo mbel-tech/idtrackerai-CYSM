@@ -27,6 +27,13 @@ from .errors import PipelineError, SamplingError
 
 
 def sample_main():
+    # listing, naming and planning each ask where every clip really is; resolving
+    # that once for the whole command matters on a network share
+    with sampling_mod.locations_cached():
+        _sample()
+
+
+def _sample():
     parser = argparse.ArgumentParser(
         prog="idtrackerai_d2_sample",
         description="Sample frames from videos for LabelMe annotation",
