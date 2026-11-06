@@ -350,8 +350,15 @@ def assign_names(
 
     Everything is compared case-folded, because ``Cam1`` and ``cam1`` collide on
     Windows and macOS, and clips are handled in location order, so the same clips
-    always get the same names. Only path strings and the manifest are read: an
-    unplugged drive changes nothing. The result is keyed by the paths as given.
+    always get the same names. Names come from the path strings and the
+    manifest; the only file-system access is resolving each path's real
+    location, which is quick for an absent or unmounted drive but can wait on a
+    stalled network mount. The result is keyed by the paths as given.
+
+    A recorded clip keeps its name even when the manifest records another clip
+    under the same name (a folder written by a version that let two clips share
+    a name). Listing either one would then write over the other's frames, so
+    that raises :class:`SamplingError`, whichever of them are listed.
     """
     survey = _survey(videos, recorded)
     new, held, taken = survey.new, survey.held, survey.taken
@@ -394,10 +401,18 @@ def assign_names(
         location: held[location][1] if location in held else named[location]
         for location in wanted
     }
-    users: dict[str, list[tuple[str, str]]] = {}  # folded name -> (name, path)
+    # folded name -> location -> (name, path), for every clip that will use it
+    users: dict[str, dict[str, tuple[str, str]]] = {}
     for location, name in chosen.items():
-        users.setdefault(name.casefold(), []).append((name, wanted[location].path))
-    repeated = sorted(sorted(group) for group in users.values() if len(group) > 1)
+        users.setdefault(name.casefold(), {})[location] = (name, wanted[location].path)
+    # A listed clip keeps its recorded name, so it would write over the frames of
+    # any other clip recorded under that name, listed or not: count those too.
+    for location, (clip, name) in held.items():
+        if name.casefold() in users:
+            users[name.casefold()].setdefault(location, (name, clip.path))
+    repeated = sorted(
+        sorted(group.values()) for group in users.values() if len(group) > 1
+    )
     if repeated:  # only a manifest that already repeats a name can get here
         detail = "\n  ".join(
             f"{group[0][0]}: " + ", ".join(path for _, path in group)

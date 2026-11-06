@@ -118,7 +118,11 @@ def sample_main():
         )
         print(f"\n{len(videos)} video(s), {sum(p.available for p in plans)} frames total")
         for plan in plans:
-            print(f"  {plan.video.name}: taking {plan.requested} of {plan.available}")
+            # a renamed clip leads with its name, so two cam1.avi read apart
+            shown = plan.video.name
+            if plan.name != plan.video.stem:
+                shown = f"{plan.name} ({plan.video.name})"
+            print(f"  {shown}: taking {plan.requested} of {plan.available}")
 
         renamed = sampling_mod.describe_renames(videos, names, on_record)
         if renamed:

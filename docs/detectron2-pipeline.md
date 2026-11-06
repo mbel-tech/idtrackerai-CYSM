@@ -131,12 +131,13 @@ pipeline**:
    become `day1-cam1`, `day2-cam1` and `day1-cam2`. That is deliberate: it keeps
    the pieces of one recording (`part_1`, `part_2`) in one train/validation
    group, which renaming only the clip that collided would not. Two files in one
-   folder that differ only in their extension (`cam1.mp4`, `cam1.avi`) are
-   numbered `cam1` and `cam1-2`.
+   folder that differ only in their extension (`cam1.avi`, `cam1.mp4`) are named
+   `cam1` and `cam1-2`, in that order.
 
    Grouping corrections made in the group editor are stored under the clip's
    name, so a correction stored under a plain file name stops applying once a
-   collision renames that clip, and nothing tells you.
+   collision renames that clip, and nothing tells you. Re-enter it in the group
+   editor, where the clip now shows under its new name.
 
    Frames already in the output folder are never renamed; the folder's manifest
    decides. A clip sampled earlier under its plain name keeps it, and only later
@@ -154,9 +155,14 @@ pipeline**:
    prevent, so read the plan when you re-sample from a moved folder.
 
    If an older run already left two different clips recorded under one name in
-   a folder's manifest, sampling both stops before writing anything, names the
-   clips, and says how to recover: sample into a new frames folder, or delete
-   the frames of one of the clips from this one.
+   a folder's manifest, sampling either of them, alone or together, stops before
+   writing anything, names both clips, and says how to recover: sample into a
+   new frames folder, or delete the frames of one of the clips from this one.
+
+   A frames folder whose `sampling_manifest.json` was deleted, or was written
+   before source paths were recorded, is not protected: frames with the same
+   names can overwrite each other silently. Keep the manifest with the frames,
+   and sample into a new folder if it is gone.
 
    The export side is unchanged. Contour files are still named
    `<video file name>.h5`, so clips with the same file name cannot be exported
