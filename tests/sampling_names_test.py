@@ -350,6 +350,24 @@ def test_two_recorded_clips_that_already_share_a_name_are_reported(tmp_path):
         assign_names(videos, recorded)
 
 
+def test_one_listed_clip_whose_recorded_name_is_shared_is_reported(tmp_path):
+    """Listing only day2 must not let it overwrite the frames recorded for day1."""
+    day1, day2 = tmp_path / "day1" / "cam1.mp4", tmp_path / "day2" / "cam1.mp4"
+    recorded = [(str(day1), "cam1"), (str(day2), "cam1")]
+    with pytest.raises(SamplingError) as caught:
+        assign_names([day2], recorded)
+    message = str(caught.value)
+    assert str(day1) in message and str(day2) in message and "cam1" in message
+    assert "new frames folder" in message and "delete the frames" in message
+
+
+def test_a_new_clip_is_fine_beside_a_name_the_manifest_records_twice(tmp_path):
+    day1, day2 = tmp_path / "day1" / "cam1.mp4", tmp_path / "day2" / "cam1.mp4"
+    day3 = tmp_path / "day3" / "cam1.mp4"
+    recorded = [(str(day1), "cam1"), (str(day2), "cam1")]
+    assert assign_names([day3], recorded) == {day3: "day3-cam1"}
+
+
 # ------------------------------------------------------- contour files by stem
 def test_repeated_stems_finds_only_shared_stems():
     a1, b1, a2 = Path("a/cam1.mp4"), Path("b/cam1.mp4"), Path("a/cam2.mp4")

@@ -14,6 +14,7 @@ actually read.
 
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -209,6 +210,44 @@ def test_two_clips_already_recorded_under_one_name_stop_the_run_before_it_writes
     assert manifest.read_text(encoding="utf-8") == manifest_before
 
 
+def test_one_listed_clip_cannot_overwrite_the_frames_of_the_clip_it_shares_a_name_with(
+    tmp_path,
+):
+    """The same corrupted manifest, but only the second clip is sampled."""
+    day1 = make_video(tmp_path / "day1" / "cam1.avi")
+    day2 = make_video(tmp_path / "day2" / "cam1.avi")
+    out = tmp_path / "frames"
+    records = [
+        {
+            "file_name": f"cam1_f{i:06d}.png",
+            "source_video": "cam1",
+            "source_path": str(day1),
+        }
+        for i in range(1, 4)
+    ] + [
+        {
+            "file_name": "cam1_f000004.png",
+            "source_video": "cam1",
+            "source_path": str(day2),
+        }
+    ]
+    for record in records:
+        (out / record["file_name"]).parent.mkdir(parents=True, exist_ok=True)
+        (out / record["file_name"]).write_bytes(b"day1 frame")
+    manifest = out / "sampling_manifest.json"
+    manifest.write_text(json.dumps({"frames": records}), encoding="utf-8")
+    files_before = {p.name: p.read_bytes() for p in out.iterdir()}
+    manifest_before = manifest.read_text(encoding="utf-8")
+
+    with pytest.raises(SamplingError) as caught:
+        sample([day2], out)
+
+    message = str(caught.value)
+    assert str(day1) in message and str(day2) in message and "cam1" in message
+    assert {p.name: p.read_bytes() for p in out.iterdir()} == files_before
+    assert manifest.read_text(encoding="utf-8") == manifest_before
+
+
 def test_sampling_the_same_clip_again_is_still_fine(tmp_path):
     clip = make_video(tmp_path / "day1" / "cam1.avi")
     out = tmp_path / "frames"
@@ -364,8 +403,26 @@ def test_the_cli_names_clips_that_share_a_file_name(tmp_path, monkeypatch, capsy
     shown = capsys.readouterr().out
     assert "named by folder" in shown
     assert "day1-cam1" in shown and "day2-cam1" in shown
+    # the per-clip plan tells the two cam1.avi apart, not "cam1.avi" twice
+    assert re.search(r"^  day1-cam1 \(cam1\.avi\): taking \d+ of 20$", shown, re.M)
+    assert re.search(r"^  day2-cam1 \(cam1\.avi\): taking \d+ of 20$", shown, re.M)
     assert sources_in(out) == {str(day1), str(day2)}
     assert list(out.glob("day1-cam1_f*.png")) and list(out.glob("day2-cam1_f*.png"))
+
+
+def test_the_cli_plan_line_of_an_unrenamed_clip_is_unchanged(
+    tmp_path, monkeypatch, capsys
+):
+    make_video(tmp_path / "other" / "cam1.avi")
+    out = tmp_path / "frames"
+
+    run_cli(
+        monkeypatch, "--videos", tmp_path / "other", "--n-frames", 4, "--output", out
+    )
+
+    shown = capsys.readouterr().out
+    assert re.search(r"^  cam1\.avi: taking 4 of 20$", shown, re.M)
+    assert "named by folder" not in shown
 
 
 # ------------------------------------------------------------- the app panel
