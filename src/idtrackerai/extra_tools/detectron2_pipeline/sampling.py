@@ -18,10 +18,13 @@ import glob
 import json
 import os
 import random
-from collections.abc import Callable, Sequence
+import re
+from collections import Counter
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePath
+from typing import NamedTuple
 
 import cv2
 
@@ -183,6 +186,348 @@ def check_against_folder(videos: Sequence[Path], output: Path) -> None:
         " overwrite or be mistaken for each other. Sample them into a new"
         f" folder, or rename one of each pair first. {detail}"
     )
+
+
+def recorded_clips(output: Path) -> list[tuple[str, str]]:
+    """``(source path, name)`` of each clip with a frame still in ``output``.
+
+    The manifest records which clip every frame came from and the name the
+    frames were given. Only frames still on disk count, as in
+    :func:`_merge_manifest`: a batch the user deleted leaves nothing to
+    overwrite, so it no longer holds its name. A clip counts once, however many
+    of its frames remain, and costs about one ``stat`` to confirm.
+
+    A record with no source path (written before paths were kept) cannot say
+    which clip it came from. A manifest that is missing, unreadable or the wrong
+    shape says nothing at all. Neither objects: they are skipped. A
+    ``source_video`` that carries a video extension is read as the stem it
+    stands for, since that is the spelling older manifests used.
+    """
+    try:
+        records = json.loads(
+            (output / "sampling_manifest.json").read_text(encoding="utf-8")
+        ).get("frames", [])
+    except (OSError, ValueError, AttributeError):
+        return []
+    if not isinstance(records, list):
+        return []
+
+    held: dict[tuple[str, str], None] = {}
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        file_name = record.get("file_name")
+        name = record.get("source_video")
+        path = record.get("source_path")
+        if not (
+            isinstance(file_name, str)
+            and isinstance(name, str)
+            and isinstance(path, str)
+            and file_name
+            and name
+            and path
+        ):
+            continue
+        for suffix in VIDEO_SUFFIXES:
+            if name.lower().endswith(suffix):
+                name = name[: -len(suffix)]
+                break
+        if (path, name) in held:
+            continue
+        try:
+            present = (output / file_name).is_file()
+        except OSError:  # a file name the file system will not even look up
+            present = False
+        if present:
+            held[(path, name)] = None
+    return list(held)
+
+
+_ILLEGAL_IN_A_NAME = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+
+
+def _sanitise(part: str) -> str:
+    """A folder name made safe to put inside a file name on any platform.
+
+    Windows refuses ``<>:"/\\|?*`` and control characters in file names, while
+    Linux and macOS allow most of them in a folder name. Without this, a
+    folder called ``a:b`` would produce frame names that cannot be written on
+    one of the machines the frames are shared with.
+    """
+    return _ILLEGAL_IN_A_NAME.sub("_", part)
+
+
+def _folder_chain(path: PurePath) -> list[str]:
+    """The names of the folders above ``path``, outermost first.
+
+    The drive or share (``D:\\``, ``\\\\server\\share\\``) and the root are
+    left out: the same experiment on two drives should not need the drive
+    letter to tell its folders apart, and a letter says nothing about the
+    recording.
+    """
+    parts = path.parent.parts
+    return list(parts[1:] if path.anchor else parts)
+
+
+class _Clip(NamedTuple):
+    """One video as naming sees it."""
+
+    path: str  # absolute, as the caller spelled it
+    location: str  # where the file really is: two spellings of it agree
+    folder: str  # where its folder really is, likewise
+    stem: str
+
+
+class _Survey(NamedTuple):
+    """The clips a naming decision looks at, found once."""
+
+    clip_of: dict[Path, _Clip]
+    """Each video as given, mapped to its clip (one clip per location)."""
+    new: dict[str, _Clip]
+    """Location to clip, in location order, for clips with no recorded name."""
+    held: dict[str, tuple[_Clip, str]]
+    """Location to clip and recorded name, in path order."""
+    taken: set[str]
+    """Every recorded name, case-folded."""
+    stems: dict[str, list[_Clip]]
+    """Case-folded stem to the new and recorded clips that have it, by path."""
+
+
+def _survey(videos: Sequence[Path], recorded: Sequence[tuple[str, str]]) -> _Survey:
+    folders: dict[str, str] = {}
+
+    def clip(path) -> _Clip:
+        path = os.path.abspath(path)
+        parent = os.path.dirname(path)
+        if parent not in folders:  # a long list repeats its folders
+            folders[parent] = _location(parent)
+        return _Clip(path, _location(path), folders[parent], Path(path).stem)
+
+    # One file spelled two ways is one clip. It takes the spelling that sorts
+    # first, so the answer does not depend on the order the videos came in.
+    given = {video: clip(video) for video in videos}
+    spelled: dict[str, _Clip] = {}
+    for found in given.values():
+        if found.location not in spelled or found.path < spelled[found.location].path:
+            spelled[found.location] = found
+
+    entries = sorted((os.path.abspath(path), name) for path, name in recorded)
+    held: dict[str, tuple[_Clip, str]] = {}
+    for path, name in entries:
+        found = clip(path)
+        held.setdefault(found.location, (found, name))
+
+    new = {
+        location: found
+        for location, found in sorted(spelled.items())
+        if location not in held
+    }
+    everyone = sorted(
+        [*new.values(), *(found for found, _ in held.values())],
+        key=lambda found: found.path,
+    )
+    stems: dict[str, list[_Clip]] = {}
+    for found in everyone:
+        stems.setdefault(found.stem.casefold(), []).append(found)
+    return _Survey(
+        clip_of={video: spelled[found.location] for video, found in given.items()},
+        new=new,
+        held=held,
+        taken={name.casefold() for _, name in entries},
+        stems=stems,
+    )
+
+
+def _first_elsewhere(clip: _Clip, stems: Mapping[str, list[_Clip]]) -> _Clip | None:
+    """The first clip, by path, with this file name in a different folder."""
+    group = stems.get(clip.stem.casefold(), ())
+    return next((other for other in group if other.folder != clip.folder), None)
+
+
+def _qualified(prefix: str, stem: str) -> str:
+    return f"{prefix}-{stem}" if prefix else stem
+
+
+def _choose_prefixes(
+    folders: Sequence[str],
+    members: Mapping[str, list[_Clip]],
+    recorded_prefixes: Sequence[str],
+    taken: set[str],
+) -> dict[str, str]:
+    """The last ``d`` folder names of each folder, for the smallest ``d`` that works.
+
+    ``d`` works when the prefixes are different from each other and from every
+    prefix already on record, and no name they make is already taken. One ``d``
+    serves all the folders so the rule is easy to state, which means a deep
+    collision elsewhere in the tree can lengthen an unrelated prefix. If no
+    ``d`` works the deepest is used and numbering finishes the job.
+    """
+    # a folder reached by two spellings is named as its first clip spelled it
+    chains = {
+        folder: _folder_chain(Path(members[folder][0].path)) for folder in folders
+    }
+    deepest = max(map(len, chains.values()), default=0)
+    on_record = {prefix.casefold() for prefix in recorded_prefixes}
+
+    def at(depth: int) -> dict[str, str]:
+        return {
+            folder: "-".join(
+                _sanitise(part) for part in chain[max(len(chain) - depth, 0) :]
+            )
+            for folder, chain in chains.items()
+        }
+
+    for depth in range(1, deepest + 1):
+        prefixes = at(depth)
+        folded = [prefix.casefold() for prefix in prefixes.values()]
+        if len(set(folded)) < len(folded) or not on_record.isdisjoint(folded):
+            continue
+        if any(
+            _qualified(prefixes[folder], clip.stem).casefold() in taken
+            for folder in folders
+            for clip in members[folder]
+        ):
+            continue
+        return prefixes
+    return at(deepest)
+
+
+def assign_names(
+    videos: Sequence[Path], recorded: Sequence[tuple[str, str]] = ()
+) -> dict[Path, str]:
+    """One unique name per video, built from its folders where file names clash.
+
+    Frames are named after the clip and the train/validation split groups on
+    that name, so two clips with one file name (``day1/cam1.mp4`` and
+    ``day2/cam1.mp4``) would overwrite each other's frames and count as one
+    recording. A clip keeps its file name unless its *folder* is involved in a
+    clash; then every clip from that folder takes the folder's name as a prefix,
+    so the pieces of one recording stay together in the split.
+
+    ``recorded`` is what :func:`recorded_clips` reads from the output folder.
+    Frames that exist are never renamed: a recorded clip keeps its name, found
+    by location so a relative and an absolute path to one file agree, and a
+    folder with qualified clips on record keeps the prefix they were given.
+
+    1. A recorded clip keeps its recorded name.
+    2. Every other clip is new. It is *contested* if its file name, case-folded,
+       is the file name of a clip in another folder, new or recorded, or is a
+       name already on record.
+    3. The folders of contested clips are qualified, and so are folders with a
+       prefix on record. Their new clips take the folder's prefix; others keep
+       their file name.
+    4. A new prefix is the last ``d`` folder names joined by ``-`` (see
+       :func:`_choose_prefixes`). Folder names have characters Windows refuses
+       replaced by ``_``; a file name is never altered.
+    5. A name still taken gets ``-2``, ``-3``, ... in location order, the first
+       keeping the bare name.
+
+    Everything is compared case-folded, because ``Cam1`` and ``cam1`` collide on
+    Windows and macOS, and clips are handled in location order, so the same clips
+    always get the same names. Only path strings and the manifest are read: an
+    unplugged drive changes nothing. The result is keyed by the paths as given.
+    """
+    survey = _survey(videos, recorded)
+    new, held, taken = survey.new, survey.held, survey.taken
+
+    on_record: dict[str, str] = {}  # folder -> the prefix its clips were given
+    for clip, name in held.values():
+        tail = f"-{clip.stem}"
+        if len(name) > len(tail) and name.endswith(tail):
+            on_record.setdefault(clip.folder, name[: -len(tail)])
+
+    members: dict[str, list[_Clip]] = {}
+    for clip in new.values():
+        members.setdefault(clip.folder, []).append(clip)
+
+    contested = {
+        clip.folder
+        for clip in new.values()
+        if clip.stem.casefold() in taken or _first_elsewhere(clip, survey.stems)
+    }
+    prefixes = _choose_prefixes(
+        sorted(folder for folder in contested if folder not in on_record),
+        members,
+        list(on_record.values()),
+        taken,
+    )
+    prefixes.update({f: on_record[f] for f in members if f in on_record})
+
+    used = set(taken)
+    named: dict[str, str] = {}
+    for location, clip in new.items():
+        base = _qualified(prefixes.get(clip.folder, ""), clip.stem)
+        name, number = base, 2
+        while name.casefold() in used:
+            name, number = f"{base}-{number}", number + 1
+        used.add(name.casefold())
+        named[location] = name
+
+    wanted = {clip.location for clip in survey.clip_of.values()}
+    chosen = {
+        location: held[location][1] if location in held else named[location]
+        for location in wanted
+    }
+    count = Counter(name.casefold() for name in chosen.values())
+    repeated = sorted({name for name in chosen.values() if count[name.casefold()] > 1})
+    if repeated:  # unreachable unless the manifest already repeats a name
+        raise SamplingError(
+            "Could not give every video a different name; repeated: "
+            + ", ".join(repeated)
+            + ". The frames folder's manifest may already record two different"
+            " videos under one name."
+        )
+    return {video: chosen[clip.location] for video, clip in survey.clip_of.items()}
+
+
+def describe_renames(
+    videos: Sequence[Path],
+    names: Mapping[Path, str],
+    recorded: Sequence[tuple[str, str]] = (),
+) -> list[str]:
+    """One line for each clip whose name is not its file name, saying why.
+
+    A clip is renamed because another clip shares its file name, so the line
+    names that clip, which lets the user tell a move from a different video. A
+    clip with no such partner is renamed because its folder was: the line names a
+    clip in that folder that does have one. Nothing renamed gives ``[]``. A clip
+    listed twice under different spellings is described once.
+    """
+    survey = _survey(videos, recorded)
+
+    mates: dict[str, _Clip] = {}  # folder -> its first clip that shares a name
+    for group in survey.stems.values():
+        for clip in group:
+            if _first_elsewhere(clip, survey.stems) and (
+                clip.folder not in mates or clip.path < mates[clip.folder].path
+            ):
+                mates[clip.folder] = clip
+
+    lines: list[str] = []
+    seen: set[str] = set()
+    for video in videos:
+        clip = survey.clip_of[video]
+        name = names[video]
+        if clip.location in seen or name == video.stem:
+            continue
+        seen.add(clip.location)
+        # a partner in another folder is why a folder is renamed; a twin in the
+        # same folder (cam1.mp4 beside cam1.avi) only explains a number
+        group = survey.stems.get(clip.stem.casefold(), [])
+        other = _first_elsewhere(clip, survey.stems) or next(
+            (found for found in group if found.location != clip.location), None
+        )
+        if other is not None:
+            lines.append(f"{video} -> {name}  (shares a file name with {other.path})")
+        elif clip.folder in mates:
+            mate = mates[clip.folder]
+            lines.append(
+                f"{video} -> {name}  (same folder as {mate.path},"
+                " which shares a file name)"
+            )
+        else:  # named after clips already on record, which are not shown here
+            lines.append(f"{video} -> {name}")
+    return lines
 
 
 def stratified_indices(n_frames: int, n_take: int, rng: random.Random) -> list[int]:
