@@ -27,6 +27,8 @@ from idtrackerai.GUI_tools import (
     key_event_modifier,
 )
 
+from .gaps import interpolate_gap
+
 
 class CustomComboBox(QComboBox):
     def keyPressEvent(self, e: QKeyEvent | None) -> None:
@@ -423,6 +425,52 @@ class Interpolator(QGroupBox):
         # Land on the far side of the gap that was just filled, which is where
         # the next error usually is.
         self.go_to_frame.emit(self.end)
+
+    def batch_interpolate(self, gaps: list[tuple[int, int, int]]) -> None:
+        """Fills several Miss id gaps with straight lines, without the dialog.
+
+        `gaps` are `(identity, start, length)` with the identity counted from 1,
+        as the error list reports them. Linear regardless of the mode chosen in
+        the dialog: these are the gaps already judged safe to cross in a
+        straight line, and a spline through widely spaced points is the
+        overshoot PCHIP exists to avoid.
+
+        The whole batch is one undo step. `interpolation_accepted` is not
+        emitted, because it is how the error list learns that a Jump was
+        corrected, and none of these are Jumps.
+        """
+        fills = []
+        for identity, start, length in dict.fromkeys(gaps):
+            positions = interpolate_gap(self.trajectories, identity - 1, start, length)
+            if positions is None:
+                logging.warning(
+                    f"Cannot interpolate the gap of identity {identity} at frame"
+                    f" {start}: no position on both sides"
+                )
+                continue
+            fills.append((identity, start, positions))
+        if not fills:
+            return
+
+        frames = sorted(
+            {
+                frame
+                for _, start, positions in fills
+                for frame in range(start, start + len(positions))
+            }
+        )
+        if self.undo_manager is not None:
+            self.undo_manager.push_frames(
+                f"Interpolate {len(fills)} flagged gaps", frames
+            )
+
+        for identity, start, positions in fills:
+            for frame, centroid in enumerate(positions, start):
+                if np.isnan(self.trajectories[frame, identity - 1, 0]):
+                    self.list_of_blobs.add_centroid(frame, identity, centroid)
+
+        self.update_trajectories.emit(frames[0], frames[-1] + 1, True)
+        logging.info(f"Interpolated {len(fills)} flagged gaps")
 
     @property
     def start(self) -> int:

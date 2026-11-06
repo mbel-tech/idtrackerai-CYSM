@@ -173,6 +173,8 @@ Contains all errors in the current session classified into four types:
 
 Clicking an error will make video player focus on it and, if the clicked error is of type ``Miss id`` or ``Jump``, the :ref:`interpolator` will activate. As some ``Jumps`` errors are not real errors, already user interpolated jumps (even if they still are over the threshold) will no longer appear as errors. User can reset the list of user accepted jumps by clicking *"Reset"*.
 
+Every ``Miss id`` row has a *"Flag"* checkbox. *"Flag unambiguous"* ticks it for each gap in which no other animal comes closer than the *"Vicinity"* distance (in pixels) to the straight line across the gap, and *"Interpolate all flagged"* fills every ticked gap with that line in one step, which *Ctrl+Z* undoes as a whole. Gaps at the very start or end of the video have no line to draw and are skipped. The flags are cleared whenever the list of errors is rebuilt.
+
 .. _interpolator_link:
 
 Interpolator
