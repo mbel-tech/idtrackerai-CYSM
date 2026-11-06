@@ -463,6 +463,19 @@ def describe_renames(
     return lines
 
 
+def repeated_stems(videos: Sequence[Path]) -> dict[str, list[Path]]:
+    """Each file name shared by two or more videos, with the videos sharing it.
+
+    Contour files are named ``<stem>.h5`` and paired with their video by that
+    name, so these are the clips an export cannot keep apart. The comparison is
+    exact, as the exporter's own check is.
+    """
+    by_stem: dict[str, list[Path]] = {}
+    for video in videos:
+        by_stem.setdefault(video.stem, []).append(video)
+    return {stem: paths for stem, paths in by_stem.items() if len(paths) > 1}
+
+
 def stratified_indices(n_frames: int, n_take: int, rng: random.Random) -> list[int]:
     """One frame from each of n_take equal blocks, at a random point within it."""
     if n_take >= n_frames:

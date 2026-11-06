@@ -23,6 +23,7 @@ from idtrackerai.extra_tools.detectron2_pipeline.sampling import (
     assign_names,
     describe_renames,
     recorded_clips,
+    repeated_stems,
 )
 
 
@@ -345,3 +346,10 @@ def test_two_recorded_clips_that_already_share_a_name_are_reported(tmp_path):
     recorded = [(str(video), "cam1") for video in videos]
     with pytest.raises(SamplingError, match="cam1"):
         assign_names(videos, recorded)
+
+
+# ------------------------------------------------------- contour files by stem
+def test_repeated_stems_finds_only_shared_stems():
+    a1, b1, a2 = Path("a/cam1.mp4"), Path("b/cam1.mp4"), Path("a/cam2.mp4")
+    assert repeated_stems([a1, b1, a2]) == {"cam1": [a1, b1]}
+    assert repeated_stems([a1, a2]) == {}

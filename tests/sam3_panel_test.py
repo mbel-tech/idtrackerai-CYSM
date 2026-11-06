@@ -401,3 +401,37 @@ def test_a_finished_export_does_not_claim_the_session_adopted_it(panel, tmp_path
     assert shown, "the user should still be told the export finished"
     assert "tracks from them" not in shown[0]
     assert "written to" in shown[0]
+
+
+def test_export_refuses_clips_that_would_share_a_contour_file(panel, tmp_path):
+    """Contour files are named for the clip's file name, so two clips called
+    cam1.mp4 would write one file, and the second would be skipped as 'done'."""
+    from idtrackerai.segmentation_app.widgets import sam3_panel as panel_mod
+
+    first, second = tmp_path / "a" / "cam1.mp4", tmp_path / "b" / "cam1.mp4"
+    panel.gpu = report(cuda=True, sam3="0.1.4")
+    panel.weights = tmp_path / "sam3.pt"
+    panel.contours_dir = tmp_path / "contours"
+    panel.video_paths = [first, second]
+
+    warned, started = [], []
+    mp = pytest.MonkeyPatch()
+    mp.setattr(
+        panel_mod.QMessageBox,
+        "warning",
+        staticmethod(lambda *a, **k: warned.append(a[2])),
+    )
+    mp.setattr(panel.export_thread, "start", lambda *a, **k: started.append(True))
+    try:
+        panel.run_export()
+    finally:
+        mp.undo()
+
+    assert len(warned) == 1
+    assert (
+        "Two videos would write the same contour file (same file name in different"
+        " folders). Export them separately." in warned[0]
+    )
+    assert str(first) in warned[0] and str(second) in warned[0]
+    assert started == []
+    assert not (tmp_path / "contours").exists()
