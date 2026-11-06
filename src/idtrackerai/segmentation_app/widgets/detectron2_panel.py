@@ -1108,8 +1108,10 @@ class Detectron2Panel(QWidget):
         self.sampling_thread.start()
 
     def _sampling_finished(self) -> None:
-        # the run recorded its names in the manifest, which now decides them
-        self._refresh_names()
+        # The run recorded its names in the manifest, which now decides them.
+        # The list can be edited while it works, so everything that shows a
+        # name is brought up to date, not only the cache.
+        self._output_folder_changed(self.frames_dir.text())
         self.sample_button.setEnabled(True)
         result = self.sampling_thread.result
         if result is None:

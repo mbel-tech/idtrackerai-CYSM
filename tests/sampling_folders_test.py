@@ -495,6 +495,25 @@ def test_the_output_folder_decides_what_is_already_taken(d2_panel, tmp_path):
     assert listed(d2_panel) == ["day1-cam1  (cam1.avi)", "day2-cam1  (cam1.avi)"]
 
 
+def test_a_list_edited_during_a_run_is_named_from_what_the_run_recorded(
+    d2_panel, tmp_path
+):
+    day1 = make_video(tmp_path / "day1" / "cam1.avi")
+    day2 = make_video(tmp_path / "day2" / "cam1.avi")
+    out = tmp_path / "frames"
+    d2_panel.frames_dir.setText(str(out))
+    d2_panel.set_video_paths([day1])  # what the run starts with
+    d2_panel.set_video_paths([day1, day2])  # added while it works
+    assert listed(d2_panel) == ["day1-cam1  (cam1.avi)", "day2-cam1  (cam1.avi)"]
+
+    # the run only knew day1, so it recorded plain cam1
+    d2_panel.sampling_thread.result = sample([day1], out)
+    d2_panel._sampling_finished()
+
+    assert listed(d2_panel) == ["cam1.avi", "day2-cam1  (cam1.avi)"]
+    assert d2_panel.clip_names() == {day1: "cam1", day2: "day2-cam1"}
+
+
 def test_a_frames_folder_that_repeats_a_name_does_not_break_the_list(
     d2_panel, tmp_path
 ):
