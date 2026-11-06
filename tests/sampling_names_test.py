@@ -10,8 +10,10 @@ never renamed.
 """
 
 import json
+import ntpath
 import os
 import random
+import sys
 import time
 from pathlib import Path, PurePosixPath, PureWindowsPath
 
@@ -353,3 +355,18 @@ def test_repeated_stems_finds_only_shared_stems():
     a1, b1, a2 = Path("a/cam1.mp4"), Path("b/cam1.mp4"), Path("a/cam2.mp4")
     assert repeated_stems([a1, b1, a2]) == {"cam1": [a1, b1]}
     assert repeated_stems([a1, a2]) == {}
+
+
+def test_repeated_stems_compare_names_the_way_the_platform_does(monkeypatch):
+    """inference.py compares Paths, which are case-blind on Windows: there
+    ``Cam1.h5`` and ``cam1.h5`` are one file, so the guards must see them as one."""
+    first, second = Path("a/Cam1.mp4"), Path("b/cam1.mp4")
+    other = Path("a/other.mp4")
+    monkeypatch.setattr(os.path, "normcase", ntpath.normcase)
+    assert repeated_stems([first, second, other]) == {"Cam1": [first, second]}
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="Windows ignores case")
+def test_repeated_stems_keep_cases_apart_where_the_platform_does():
+    first, second = Path("a/Cam1.mp4"), Path("b/cam1.mp4")
+    assert repeated_stems([first, second]) == {}

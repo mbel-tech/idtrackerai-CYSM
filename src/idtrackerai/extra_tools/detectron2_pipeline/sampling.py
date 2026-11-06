@@ -467,12 +467,18 @@ def repeated_stems(videos: Sequence[Path]) -> dict[str, list[Path]]:
     """Each file name shared by two or more videos, with the videos sharing it.
 
     Contour files are named ``<stem>.h5`` and paired with their video by that
-    name, so these are the clips an export cannot keep apart. The comparison is
-    exact, as the exporter's own check is.
+    name, so these are the clips an export cannot keep apart. Names are compared
+    the way the platform compares paths, as the exporter's own ``Path`` equality
+    does: ignoring case on Windows, exactly elsewhere. (macOS also ignores case
+    on disk but compares ``Path`` objects exactly, so ``Cam1`` and ``cam1`` go
+    unreported there, here and in the exporter alike.) Each result is keyed by
+    the spelling met first, with its videos in the order given.
     """
     by_stem: dict[str, list[Path]] = {}
+    spelling: dict[str, str] = {}  # compared form -> first spelling met
     for video in videos:
-        by_stem.setdefault(video.stem, []).append(video)
+        key = os.path.normcase(video.stem)
+        by_stem.setdefault(spelling.setdefault(key, video.stem), []).append(video)
     return {stem: paths for stem, paths in by_stem.items() if len(paths) > 1}
 
 
