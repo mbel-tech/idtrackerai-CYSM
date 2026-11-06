@@ -16,6 +16,7 @@ lighting does halfway through.
 
 import glob
 import json
+import os
 import random
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
@@ -42,6 +43,10 @@ except ImportError:  # loaded by path, without the package around it
         make_enhancer_from,
         save_profile,
     )
+
+
+VIDEO_SUFFIXES = (".mp4", ".avi", ".mov", ".mkv", ".mpg", ".mpeg", ".wmv", ".m4v")
+"""What counts as a video when a whole folder is given instead of a file list."""
 
 
 @dataclass
@@ -116,6 +121,67 @@ def check_distinct_stems(videos: Sequence[Path]) -> None:
         "Two or more videos share a file name, and sampled frames are named "
         "after it, so they would overwrite each other. Rename or separate "
         f"them first. {detail}"
+    )
+
+
+def _location(path) -> str:
+    """A path in a form two spellings of the same file agree on."""
+    return os.path.normcase(os.path.realpath(path))
+
+
+def check_against_folder(videos: Sequence[Path], output: Path) -> None:
+    """Refuses a clip whose name is already taken, in this folder, by another.
+
+    :func:`check_distinct_stems` only compares the clips of one run. A corpus is
+    built over several runs, and a second run that brings in ``day2/cam1.mp4``
+    when ``day1/cam1.mp4`` was sampled before would write ``cam1_f000012.png``
+    over the earlier frame and record both as one clip -- no error, and an
+    annotated frame that silently shows a different video.
+
+    Only frames still on disk count, as in :func:`_merge_manifest`: a batch the
+    user deleted leaves nothing to overwrite. A record with no source path
+    (written before paths were kept), or a manifest that cannot be read, cannot
+    say what it came from, so it does not object.
+    """
+    manifest = output / "sampling_manifest.json"
+    try:
+        records = json.loads(manifest.read_text(encoding="utf-8")).get("frames", [])
+    except (OSError, ValueError, AttributeError):
+        return
+
+    held: dict[str, str] = {}
+    for record in records if isinstance(records, list) else []:
+        if not isinstance(record, dict):
+            continue
+        name, source, path = (
+            record.get("file_name"),
+            record.get("source_video"),
+            record.get("source_path"),
+        )
+        if not (name and source and path) or not (output / name).is_file():
+            continue
+        source = str(source)
+        for suffix in VIDEO_SUFFIXES:
+            if source.lower().endswith(suffix):
+                source = source[: -len(suffix)]
+                break
+        held.setdefault(source, str(path))
+
+    clashes = [
+        (video, held[video.stem])
+        for video in videos
+        if video.stem in held and _location(held[video.stem]) != _location(video)
+    ]
+    if not clashes:
+        return
+    detail = "; ".join(
+        f"{os.path.abspath(video)} vs {earlier}" for video, earlier in clashes
+    )
+    raise SamplingError(
+        f"{output} already holds frames from a different video with the same"
+        " file name, and sampled frames are named after it, so these would"
+        " overwrite or be mistaken for each other. Sample them into a new"
+        f" folder, or rename one of each pair first. {detail}"
     )
 
 
@@ -209,16 +275,52 @@ def _is_sidecar(path) -> bool:
     return name.startswith("._") or name in (".DS_Store", "Thumbs.db", "desktop.ini")
 
 
-def resolve_videos(patterns: Sequence[Path]) -> list[Path]:
-    """Expands globs and drops anything that is not a file."""
+def videos_in_folder(folder: Path, recursive: bool = False) -> list[Path]:
+    """The videos in a folder, and in everything beneath it if ``recursive``.
+
+    Sorted by path, so the same folder always yields the same list in the same
+    order: the selection number only reproduces a selection if the videos it is
+    applied to come in a fixed order. Folders whose name starts with a dot
+    (``.git``, ``.Trash``, ...) are not entered, and macOS companion files are
+    skipped, as for any other list of videos. Extensions match whatever their
+    case, which a ``*.mp4`` glob does not on a case-sensitive filesystem.
+    """
+    found: list[Path] = []
+    if recursive:
+        for here, subfolders, names in os.walk(folder):
+            subfolders[:] = [d for d in subfolders if not d.startswith(".")]
+            found.extend(Path(here) / name for name in names)
+    else:
+        try:
+            found = list(Path(folder).iterdir())
+        except OSError:
+            return []
+    return sorted(
+        p
+        for p in found
+        if p.suffix.lower() in VIDEO_SUFFIXES and p.is_file() and not _is_sidecar(p)
+    )
+
+
+def resolve_videos(patterns: Sequence[Path], recursive: bool = False) -> list[Path]:
+    """Expands globs and folders, and drops anything that is not a file.
+
+    A folder contributes the videos directly inside it, or every video beneath
+    it with ``recursive``; ``recursive`` changes nothing for a file or a glob,
+    which already say exactly what they mean. Each video appears once, at its
+    first mention.
+    """
     videos: list[Path] = []
     for pattern in patterns:
-        if any(ch in str(pattern) for ch in "*?"):
+        pattern = Path(pattern)
+        if pattern.is_dir():
+            videos.extend(videos_in_folder(pattern, recursive))
+        elif any(ch in str(pattern) for ch in "*?"):
             # glob.glob on the whole pattern, so wildcards in folder names work
             videos.extend(Path(m) for m in sorted(glob.glob(str(pattern))))
         else:
-            videos.append(Path(pattern))
-    return [v for v in videos if v.is_file() and not _is_sidecar(v)]
+            videos.append(pattern)
+    return list(dict.fromkeys(v for v in videos if v.is_file() and not _is_sidecar(v)))
 
 
 def plan_sampling(
@@ -398,6 +500,7 @@ def sample_frames(
     if image_format not in ("png", "jpg"):
         raise SamplingError(f"Unsupported image format {image_format!r}")
     check_distinct_stems(videos)
+    check_against_folder(videos, output)
     plans = plan_sampling(videos, n_frames, seed, even, uniform_random, counts)
     if not force_new_enhancement:
         check_enhancement_unchanged(output, settings)
@@ -461,7 +564,9 @@ def sample_frames(
                             # its extension made one clip look like two different
                             # recordings
                             "source_video": plan.video.stem,
-                            "source_path": str(plan.video),
+                            # absolute, so a later run from another directory
+                            # compares like with like in check_against_folder
+                            "source_path": os.path.abspath(plan.video),
                             "frame_number": index,
                             "width": image.shape[1],
                             "height": image.shape[0],

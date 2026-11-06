@@ -103,6 +103,17 @@ Segmentation changes
   across them, and a single unreadable file aborting a whole sampling run.
   Clips whose file names would collide are now refused before anything is
   written.
+- Annotation frames can be drawn from a whole folder tree: ``Include
+  subfolders`` next to ``Add folder...`` in the preparation panel, and
+  ``--recursive`` with ``idtrackerai_d2_sample --videos <folder>``, which now
+  accepts folders. The frame count remains a total, shared out across every
+  video in proportion to its length. Hidden folders and macOS ``._`` companion
+  files are skipped, and extensions match whatever their case.
+- Fixed sampling a clip into a folder that already held frames from a
+  *different* clip with the same file name (``day1/cam1.mp4`` then
+  ``day2/cam1.mp4``): the earlier frames were overwritten and both clips were
+  recorded as one, without an error. It is now refused before anything is
+  written. The manifest records each source path as an absolute path.
 - Training and contour export are steps in the Segmentation App, not only
   instructions to go elsewhere. The panel checks whether this machine has a
   CUDA GPU and Detectron2; when it does, training runs here as a managed

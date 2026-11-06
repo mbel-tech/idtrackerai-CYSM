@@ -112,6 +112,21 @@ pipeline**:
    clips just to annotate them would make one absurd concatenated session out
    of fifty separate experiments.
 
+   **Add folder...** takes the videos directly inside the folder you choose.
+   Tick **Include subfolders** first to take every video anywhere beneath it,
+   which is how you gather a whole experiment in one click. The number of
+   frames is a total for the whole list, shared out in proportion to each
+   video's length -- 600 frames from a folder of 40 clips is not 600 per clip --
+   and the selection number makes the same choice again. Hidden folders and
+   macOS `._` companion files are skipped.
+
+   Frames are named after the video file, so two clips with the same file name
+   in different folders (`day1/cam1.mp4`, `day2/cam1.mp4`) cannot share one
+   frames folder yet. The run stops before writing anything and names the pair,
+   whether they are in the same run or the second was sampled into a folder
+   that already holds frames from the first. Rename one of each pair, or sample
+   them into separate folders.
+
    Above the button, a line says what the run would do -- how many frames from
    how many videos, and the smallest and largest share. If the count is lower
    than the number of videos, it says how many would get nothing at all, which
@@ -143,6 +158,12 @@ idtrackerai_d2_enhance --video clips/clip_01.mp4 --frame 500 \
 
 # 2. pull frames for annotation, spread across the whole of every clip
 idtrackerai_d2_sample --videos clips/*.mp4 --n-frames 600 \
+    --output annotate/ --preprocess-profile setups/tank_a.json
+
+#    ...or give it a folder: 600 frames in total from every video beneath it,
+#    shared out in proportion to length (--recursive includes subfolders;
+#    without it, only the videos directly inside the folder are used)
+idtrackerai_d2_sample --videos /data/experiment --recursive --n-frames 600 \
     --output annotate/ --preprocess-profile setups/tank_a.json
 
 # 3. annotate in LabelMe: one polygon per animal, one consistent label
