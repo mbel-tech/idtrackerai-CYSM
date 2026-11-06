@@ -6,9 +6,10 @@ top level only by default, the whole tree on request, with macOS companion
 files and hidden folders left out, in an order that does not change between
 runs (the selection number is only reproducible if the order is).
 
-They also cover the guard against two different clips sharing a file name
-across separate sampling runs, which used to overwrite the earlier frames
-without a word. Real, tiny videos are used where frames are actually read.
+They also cover what happens when two different clips share a file name, in
+one run or across separate runs: each is named from its folders, and frames
+that already exist are left alone. Real, tiny videos are used where frames are
+actually read.
 """
 
 import json
@@ -138,24 +139,74 @@ def sample(videos, out, n=5, seed=1):
     return sampling_mod.sample_frames(videos, out, n, dict(DEFAULT_SETTINGS), seed=seed)
 
 
-def test_a_clip_with_the_same_name_from_elsewhere_is_refused(tmp_path):
+def source_names(out: Path) -> set[str]:
+    recorded = json.loads((out / "sampling_manifest.json").read_text("utf-8"))
+    return {f["source_video"] for f in recorded["frames"]}
+
+
+def test_same_named_clips_in_one_run_get_folder_names(tmp_path):
+    day1 = make_video(tmp_path / "day1" / "cam1.avi")
+    day2 = make_video(tmp_path / "day2" / "cam1.avi")
+    out = tmp_path / "frames"
+
+    result = sample([day1, day2], out)
+
+    assert source_names(out) == {"day1-cam1", "day2-cam1"}
+    assert list(out.glob("day1-cam1_f*.png")) and list(out.glob("day2-cam1_f*.png"))
+    assert set(result.per_video) == {"day1-cam1", "day2-cam1"}
+    assert sum(result.per_video.values()) == 5
+
+
+def test_a_later_run_names_the_newcomer_and_leaves_the_earlier_frames_alone(tmp_path):
     day1 = make_video(tmp_path / "day1" / "cam1.avi")
     day2 = make_video(tmp_path / "day2" / "cam1.avi")
     out = tmp_path / "frames"
     sample([day1], out)
-    before = sorted(p.name for p in out.glob("*.png"))
-    manifest_before = (out / "sampling_manifest.json").read_text(encoding="utf-8")
+    before = {p.name: p.read_bytes() for p in out.glob("cam1_f*.png")}
+    assert before
+
+    sample([day2], out)
+
+    assert source_names(out) == {"cam1", "day2-cam1"}
+    assert {p.name: p.read_bytes() for p in out.glob("cam1_f*.png")} == before
+    assert list(out.glob("day2-cam1_f*.png"))
+
+
+def test_two_clips_already_recorded_under_one_name_stop_the_run_before_it_writes(
+    tmp_path,
+):
+    """An older run of same-named clips can leave one name for two source paths."""
+    day1 = make_video(tmp_path / "day1" / "cam1.avi")
+    day2 = make_video(tmp_path / "day2" / "cam1.avi")
+    out = tmp_path / "frames"
+    records = [
+        {
+            "file_name": "cam1_f000001.png",
+            "source_video": "cam1",
+            "source_path": str(day1),
+        },
+        {
+            "file_name": "cam1_f000002.png",
+            "source_video": "cam1",
+            "source_path": str(day2),
+        },
+    ]
+    for record in records:
+        touch(out / record["file_name"])
+    manifest = out / "sampling_manifest.json"
+    manifest.write_text(json.dumps({"frames": records}), encoding="utf-8")
+    files_before = sorted(p.name for p in out.iterdir())
+    manifest_before = manifest.read_text(encoding="utf-8")
 
     with pytest.raises(SamplingError) as caught:
-        sample([day2], out)
+        sample([day1, day2], out)
 
     message = str(caught.value)
-    assert str(day1) in message and str(day2) in message
-    # refused before anything was written: the first clip's frames are intact
-    assert sorted(p.name for p in out.glob("*.png")) == before
-    assert (out / "sampling_manifest.json").read_text(
-        encoding="utf-8"
-    ) == manifest_before
+    assert str(day1) in message and str(day2) in message and "cam1" in message
+    assert "new frames folder" in message and "delete the frames" in message
+    # stopped before anything was written: no new image, profile or manifest change
+    assert sorted(p.name for p in out.iterdir()) == files_before
+    assert manifest.read_text(encoding="utf-8") == manifest_before
 
 
 def test_sampling_the_same_clip_again_is_still_fine(tmp_path):
@@ -175,6 +226,40 @@ def test_the_same_clip_reached_by_a_relative_path_is_not_a_clash(tmp_path, monke
     sample([Path("day1") / "cam1.avi"], out, seed=2)  # no error
 
 
+def test_one_file_listed_twice_is_sampled_once(tmp_path, monkeypatch):
+    clip = make_video(tmp_path / "day1" / "cam1.avi")
+    out = tmp_path / "frames"
+    monkeypatch.chdir(tmp_path)
+
+    result = sample([clip, Path("day1") / "cam1.avi"], out)
+
+    assert source_names(out) == {"cam1"}
+    assert len(list(out.glob("*.png"))) == 5
+    assert result.per_video == {"cam1": 5}
+
+
+def test_one_file_given_two_ways_is_resolved_once(tmp_path, monkeypatch):
+    clip = make_video(tmp_path / "day1" / "cam1.avi")
+    monkeypatch.chdir(tmp_path)
+    assert sampling_mod.resolve_videos([clip, Path("day1") / "cam1.avi"]) == [clip]
+
+
+def test_plan_sampling_carries_the_names(tmp_path):
+    first, second = tmp_path / "a" / "cam1.avi", tmp_path / "b" / "cam1.avi"
+    chosen = {first: "left-cam1", second: "right-cam1"}
+
+    plans = sampling_mod.plan_sampling(
+        [first, second], 10, counts=[100, 100], names=chosen
+    )
+    assert [p.name for p in plans] == ["left-cam1", "right-cam1"]
+
+    # without names it assigns them, as for a folder with nothing recorded
+    plans = sampling_mod.plan_sampling([first, second], 10, counts=[100, 100])
+    assert [p.name for p in plans] == ["a-cam1", "b-cam1"]
+
+    assert sampling_mod.VideoPlan(first, 10, 5).name == "cam1"
+
+
 def test_different_names_share_a_folder_without_trouble(tmp_path):
     one = make_video(tmp_path / "day1" / "cam1.avi")
     two = make_video(tmp_path / "day2" / "cam2.avi")
@@ -192,28 +277,8 @@ def test_frames_that_were_deleted_no_longer_hold_the_name(tmp_path):
     sample([day1], out)
     for image in out.glob("*.png"):
         image.unlink()  # the user threw that batch away
-    sample([day2], out)  # nothing left to overwrite, so no error
-
-
-def test_a_manifest_that_predates_source_paths_cannot_object(tmp_path):
-    out = tmp_path / "frames"
-    touch(out / "cam1_f000003.png")
-    (out / "sampling_manifest.json").write_text(
-        json.dumps(
-            {"frames": [{"file_name": "cam1_f000003.png", "source_video": "cam1.mp4"}]}
-        ),
-        encoding="utf-8",
-    )
-    new = tmp_path / "day2" / "cam1.avi"
-    touch(new)
-    sampling_mod.check_against_folder([new], out)  # unknowable, so allowed
-
-
-def test_an_unreadable_manifest_cannot_object(tmp_path):
-    out = tmp_path / "frames"
-    out.mkdir()
-    (out / "sampling_manifest.json").write_text("{not json", encoding="utf-8")
-    sampling_mod.check_against_folder([tmp_path / "cam1.avi"], out)
+    sample([day2], out)  # nothing left to overwrite, so the name is free
+    assert source_names(out) == {"cam1"}
 
 
 # ------------------------------------------------------------------------ CLI
@@ -278,6 +343,29 @@ def test_the_cli_says_so_when_a_folder_holds_no_videos(tmp_path, monkeypatch):
             monkeypatch, "--videos", empty, "--n-frames", 5, "--output", tmp_path / "o"
         )
     assert "No videos" in str(caught.value)
+
+
+def test_the_cli_names_clips_that_share_a_file_name(tmp_path, monkeypatch, capsys):
+    day1 = make_video(tmp_path / "other" / "day1" / "cam1.avi")
+    day2 = make_video(tmp_path / "other" / "day2" / "cam1.avi")
+    out = tmp_path / "frames"
+
+    run_cli(
+        monkeypatch,
+        "--videos",
+        tmp_path / "other",
+        "--recursive",
+        "--n-frames",
+        6,
+        "--output",
+        out,
+    )
+
+    shown = capsys.readouterr().out
+    assert "named by folder" in shown
+    assert "day1-cam1" in shown and "day2-cam1" in shown
+    assert sources_in(out) == {str(day1), str(day2)}
+    assert list(out.glob("day1-cam1_f*.png")) and list(out.glob("day2-cam1_f*.png"))
 
 
 # ------------------------------------------------------------- the app panel
