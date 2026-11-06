@@ -101,8 +101,6 @@ Segmentation changes
   manifest instead of replacing it.
 - Fixed the frame budget being concentrated on one clip rather than spread
   across them, and a single unreadable file aborting a whole sampling run.
-  Clips whose file names would collide are now refused before anything is
-  written.
 - Annotation frames can be drawn from a whole folder tree: ``Include
   subfolders`` next to ``Add folder...`` in the preparation panel, and
   ``--recursive`` with ``idtrackerai_d2_sample --videos <folder>``, which now
@@ -112,8 +110,17 @@ Segmentation changes
 - Fixed sampling a clip into a folder that already held frames from a
   *different* clip with the same file name (``day1/cam1.mp4`` then
   ``day2/cam1.mp4``): the earlier frames were overwritten and both clips were
-  recorded as one, without an error. It is now refused before anything is
-  written. The manifest records each source path as an absolute path.
+  recorded as one, without an error. The second clip is now given its own name
+  built from its folders (``day2-cam1``), and the plan lists it before anything
+  is written. When folders collide, every clip from a collided folder takes the
+  folder's prefix, which keeps the pieces of one recording in one
+  train/validation group, and frames already in the folder are never renamed.
+  The manifest records each source path as an absolute path.
+- The in-app SAM 3 export now refuses a list in which two clips share a file
+  name, before writing anything, as the command-line exporter and the session
+  loader already did: contour files are named for the video's file name, so the
+  second clip would otherwise be skipped as already done. The Detectron2 export
+  step warns about it before the command is copied.
 - Training and contour export are steps in the Segmentation App, not only
   instructions to go elsewhere. The panel checks whether this machine has a
   CUDA GPU and Detectron2; when it does, training runs here as a managed

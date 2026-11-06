@@ -120,12 +120,50 @@ pipeline**:
    and the selection number makes the same choice again. Hidden folders and
    macOS `._` companion files are skipped.
 
-   Frames are named after the video file, so two clips with the same file name
-   in different folders (`day1/cam1.mp4`, `day2/cam1.mp4`) cannot share one
-   frames folder yet. The run stops before writing anything and names the pair,
-   whether they are in the same run or the second was sampled into a folder
-   that already holds frames from the first. Rename one of each pair, or sample
-   them into separate folders.
+   Frames are named after the video file (`cam1.mp4` gives `cam1_f000123.png`),
+   and the train/validation split treats each name as one source. Clips with the
+   same file name in different folders (`day1/cam1.mp4`, `day2/cam1.mp4`) would
+   collide, so they are named from their folders instead: `day1-cam1` and
+   `day2-cam1`. The prefix is the last folder names, joined by a hyphen, and as
+   few of them as make the prefixes distinct. A clip keeps its plain file name
+   unless its *folder* is involved in a collision; then every clip from that
+   folder gets the folder's prefix, so `day1/cam1`, `day2/cam1` and `day1/cam2`
+   become `day1-cam1`, `day2-cam1` and `day1-cam2`. That is deliberate: it keeps
+   the pieces of one recording (`part_1`, `part_2`) in one train/validation
+   group, which renaming only the clip that collided would not. Two files in one
+   folder that differ only in their extension (`cam1.mp4`, `cam1.avi`) are
+   numbered `cam1` and `cam1-2`.
+
+   Grouping corrections made in the group editor are stored under the clip's
+   name, so a correction stored under a plain file name stops applying once a
+   collision renames that clip, and nothing tells you.
+
+   Frames already in the output folder are never renamed; the folder's manifest
+   decides. A clip sampled earlier under its plain name keeps it, and only later
+   arrivals get a prefix: with `day1/cam1.mp4` sampled first, a later
+   `day2/cam1.mp4` becomes `day2-cam1` and day1 stays `cam1`. The plan is shown
+   before anything is written: `idtrackerai_d2_sample` prints a block headed
+   "Clips named by folder, because their file names are shared:", and the app's
+   line above the button says how many clips will be named by folder, while the
+   clip list shows such a clip as `day2-cam1  (cam1.avi)`.
+
+   A clip that has moved to a new location cannot be told apart from a different
+   video with the same name, so it is treated as a new clip with a new name, and
+   its frames become a second source in the split. If the earlier frames end up
+   on the other side, that is the near-duplicate leak the grouping exists to
+   prevent, so read the plan when you re-sample from a moved folder.
+
+   If an older run already left two different clips recorded under one name in
+   a folder's manifest, sampling both stops before writing anything, names the
+   clips, and says how to recover: sample into a new frames folder, or delete
+   the frames of one of the clips from this one.
+
+   The export side is unchanged. Contour files are still named
+   `<video file name>.h5`, so clips with the same file name cannot be exported
+   together: the command-line exporter and the session loader always refused
+   them, the in-app SAM 3 export now does too, and the Detectron2 export step
+   warns before the command is copied. Export such clips in separate runs, each
+   to its own output folder.
 
    Above the button, a line says what the run would do -- how many frames from
    how many videos, and the smallest and largest share. If the count is lower

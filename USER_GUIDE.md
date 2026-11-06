@@ -268,7 +268,9 @@ own list of videos.
 
 **Add folder...** takes every clip from a setup, and with **Include subfolders**
 ticked every clip beneath it too, so a whole experiment is one click; **Use open
-videos** takes the ones already loaded. The frame count is a total for the whole
+videos** takes the ones already loaded. Clips that share a file name, such as
+`cam1.avi` in two day folders, are named by folder (`day1-cam1`, `day2-cam1`)
+and shown that way in the list. The frame count is a total for the whole
 list, shared out in proportion to clip length. The summary underneath counts them — in the picture,
 *4 videos, 1 recording, 119,350 frames* — and above the **Sample frames**
 button a line says what the run would do before it does it: *600 frames from
