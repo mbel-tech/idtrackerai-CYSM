@@ -265,6 +265,49 @@ def test_the_same_clip_reached_by_a_relative_path_is_not_a_clash(tmp_path, monke
     sample([Path("day1") / "cam1.avi"], out, seed=2)  # no error
 
 
+def test_a_clip_recorded_by_a_relative_path_is_still_one_clip(tmp_path, monkeypatch):
+    """Older manifests hold the path as typed; it cannot be matched from elsewhere."""
+    clip = make_video(tmp_path / "proj" / "clips" / "cam1.avi")
+    out = tmp_path / "frames"
+    monkeypatch.chdir(tmp_path / "proj")
+    sample([Path("clips/cam1.avi")], out)
+    manifest = out / "sampling_manifest.json"
+    recorded = json.loads(manifest.read_text("utf-8"))
+    for record in recorded["frames"]:
+        record["source_path"] = "clips/cam1.avi"  # as a run before #9 wrote it
+    manifest.write_text(json.dumps(recorded), encoding="utf-8")
+
+    monkeypatch.chdir(
+        tmp_path
+    )  # another directory: the clip is reached by its full path
+    sample([clip], out)  # same selection number, so every frame name is already there
+
+    assert source_names(out) == {"cam1"}
+
+
+def test_the_same_clip_sampled_twice_with_one_selection_number_is_allowed(tmp_path):
+    clip = make_video(tmp_path / "day1" / "cam1.avi")
+    out = tmp_path / "frames"
+    sample([clip], out, seed=1)
+    sample([clip], out, seed=1)  # every frame name exists, and each is its own
+    assert source_names(out) == {"cam1"}
+
+
+def test_a_frame_that_exists_with_no_record_of_this_clip_is_not_overwritten(tmp_path):
+    day1 = make_video(tmp_path / "day1" / "cam1.avi")
+    day2 = make_video(tmp_path / "day2" / "cam1.avi")
+    out = tmp_path / "frames"
+    sample([day1], out)
+    (out / "sampling_manifest.json").unlink()  # nothing says whose frames these are
+    before = sorted(p.name for p in out.iterdir())
+
+    with pytest.raises(SamplingError) as caught:
+        sample([day2], out)
+
+    assert "cam1_f" in str(caught.value) and "new frames folder" in str(caught.value)
+    assert sorted(p.name for p in out.iterdir()) == before  # nothing was written
+
+
 def test_one_file_listed_twice_is_sampled_once(tmp_path, monkeypatch):
     clip = make_video(tmp_path / "day1" / "cam1.avi")
     out = tmp_path / "frames"
@@ -571,9 +614,8 @@ def test_a_list_edited_during_a_run_is_named_from_what_the_run_recorded(
     assert d2_panel.clip_names() == {day1: "cam1", day2: "day2-cam1"}
 
 
-def test_a_frames_folder_that_repeats_a_name_does_not_break_the_list(
-    d2_panel, tmp_path
-):
+def two_clips_recorded_under_one_name(tmp_path):
+    """A frames folder whose manifest, from an older version, repeats a name."""
     day1 = make_video(tmp_path / "day1" / "cam1.avi")
     day2 = make_video(tmp_path / "day2" / "cam1.avi")
     out = tmp_path / "frames"
@@ -587,11 +629,31 @@ def test_a_frames_folder_that_repeats_a_name_does_not_break_the_list(
     (out / "sampling_manifest.json").write_text(
         json.dumps({"frames": records}), encoding="utf-8"
     )
+    return day1, day2, out
+
+
+def test_a_frames_folder_that_repeats_a_name_does_not_break_the_list(
+    d2_panel, tmp_path
+):
+    day1, day2, out = two_clips_recorded_under_one_name(tmp_path)
     d2_panel.set_video_paths([day1, day2])
 
     d2_panel.frames_dir.setText(str(out))  # a run would refuse; the list must not
 
     assert listed(d2_panel) == ["day1-cam1  (cam1.avi)", "day2-cam1  (cam1.avi)"]
+
+
+def test_a_frames_folder_that_repeats_a_name_is_explained_in_the_preview(
+    d2_panel, tmp_path
+):
+    day1, day2, out = two_clips_recorded_under_one_name(tmp_path)
+    d2_panel.set_video_paths([day1, day2])
+    d2_panel.frames_dir.setText(str(out))
+
+    d2_panel.update_preview()
+
+    text = d2_panel.sample_preview.text()
+    assert text.startswith("Cannot plan this yet") and str(day1) in text
 
 
 def test_a_clip_that_cannot_be_found_is_marked_under_its_name(d2_panel, tmp_path):
@@ -660,8 +722,7 @@ def test_the_export_step_warns_before_the_command_is_copied(d2_panel, tmp_path):
             make_video(tmp_path / "day2" / "cam1.avi"),
         ]
     )
-    d2_panel._update_export_command()
-    text = d2_panel.export_status.text()
+    text = d2_panel.export_status.text()  # no explicit refresh: the list change did it
     assert text.startswith("2 clips share a file name")
     assert "will refuse" in text
 
@@ -671,5 +732,30 @@ def test_the_export_step_warns_before_the_command_is_copied(d2_panel, tmp_path):
             make_video(tmp_path / "day2" / "cam2.avi"),
         ]
     )
-    d2_panel._update_export_command()
     assert "will refuse" not in d2_panel.export_status.text()
+
+
+def test_one_file_listed_under_two_spellings_is_one_clip(d2_panel, tmp_path):
+    clip = make_video(tmp_path / "day1" / "cam1.avi")
+    link = tmp_path / "link"
+    try:
+        link.symlink_to(tmp_path / "day1", target_is_directory=True)
+    except OSError:
+        pytest.skip("cannot create symlinks here")
+
+    d2_panel.set_video_paths([clip, link / "cam1.avi"])
+
+    assert d2_panel.video_paths == [clip]
+
+
+def test_the_sample_button_comes_back_even_if_the_refresh_fails(d2_panel, monkeypatch):
+    def broken(_text):
+        raise RuntimeError("the refresh failed")
+
+    monkeypatch.setattr(d2_panel, "_output_folder_changed", broken)
+    d2_panel.sample_button.setEnabled(False)
+    d2_panel.sampling_thread.result = None
+
+    d2_panel._sampling_finished()
+
+    assert d2_panel.sample_button.isEnabled()

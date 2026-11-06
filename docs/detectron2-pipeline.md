@@ -159,10 +159,16 @@ pipeline**:
    writing anything, names both clips, and says how to recover: sample into a
    new frames folder, or delete the frames of one of the clips from this one.
 
-   A frames folder whose `sampling_manifest.json` was deleted, or was written
-   before source paths were recorded, is not protected: frames with the same
-   names can overwrite each other silently. Keep the manifest with the frames,
-   and sample into a new folder if it is gone.
+   The manifest is also what protects the frames that are already there. If a
+   frame this run would write exists in the folder and the manifest does not
+   record it as coming from the same video -- because `sampling_manifest.json`
+   was deleted, or never recorded where that frame came from -- sampling stops
+   before writing anything and says so, instead of risking another clip's
+   frame. Sample into a new folder, or restore the manifest. A path an older
+   version recorded relative to its working directory, or that was written on
+   another computer, cannot be matched to a file, so it is ignored: the clip is
+   named as if the folder had never seen it, and a frame of the same name is
+   taken to be its own.
 
    The export side is unchanged. Contour files are still named
    `<video file name>.h5`, so clips with the same file name cannot be exported

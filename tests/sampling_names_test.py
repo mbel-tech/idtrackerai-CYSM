@@ -24,6 +24,7 @@ from idtrackerai.extra_tools.detectron2_pipeline.sampling import (
     _folder_chain,
     assign_names,
     describe_renames,
+    locations_cached,
     recorded_clips,
     repeated_stems,
 )
@@ -104,6 +105,11 @@ def test_a_recorded_clip_keeps_its_name(tmp_path):
     assert names == ["weird", "day2-cam1"]
 
 
+def test_a_numbered_recorded_clip_keeps_its_folders_prefix(tmp_path):
+    recorded = [("day1/cam1.mp4", "day1-cam1-2")]
+    assert names_for(tmp_path, ["day1/cam2.mp4"], recorded) == ["day1-cam2"]
+
+
 def test_a_new_prefix_keeps_clear_of_one_already_recorded(tmp_path):
     """x/day1 must not borrow the prefix day1 was recorded with, even if no name
     clashes yet; one depth serves every folder, so z/y is lengthened too."""
@@ -173,6 +179,27 @@ def test_one_file_reached_through_a_symlink_is_one_clip(tmp_path):
     direct, through = real / "cam1.mp4", tmp_path / "link" / "cam1.mp4"
     names = assign_names([through, direct])
     assert names[direct] == names[through] == "cam1"
+
+
+def test_locations_are_resolved_once_inside_a_cache_scope(tmp_path, monkeypatch):
+    videos = [tmp_path / "day1" / "cam1.mp4", tmp_path / "day2" / "cam1.mp4"]
+    calls: list[str] = []
+    real = os.path.realpath
+
+    def counting(path, *args, **kwargs):
+        calls.append(os.fspath(path))
+        return real(path, *args, **kwargs)
+
+    monkeypatch.setattr(os.path, "realpath", counting)
+    with locations_cached():
+        names = assign_names(videos)
+        describe_renames(videos, names)
+    assert len(calls) == len(set(calls))  # nothing was resolved twice
+
+    calls.clear()
+    names = assign_names(videos)
+    describe_renames(videos, names)
+    assert len(calls) > len(set(calls))  # outside a scope each call starts over
 
 
 def test_twenty_thousand_clips_are_named_quickly():
@@ -254,6 +281,24 @@ def test_a_source_video_with_an_extension_is_normalised(tmp_path):
     assert recorded_clips(tmp_path) == [("/d/cam1.mp4", "cam1")]
 
 
+def test_a_stem_that_ends_like_a_video_suffix_is_kept(tmp_path):
+    """``x.avi.mp4`` has the stem ``x.avi``, which is what its frames carry."""
+    write_manifest(tmp_path, [frame("/d/x.avi.mp4", "x.avi")])
+    assert recorded_clips(tmp_path) == [("/d/x.avi.mp4", "x.avi")]
+
+
+def test_a_recorded_path_that_is_not_absolute_records_nothing(tmp_path):
+    """Resolved against whatever directory is current, it would match nothing."""
+    write_manifest(tmp_path, [frame("clips/cam1.mp4", "cam1")])
+    assert recorded_clips(tmp_path) == []
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="a Windows path is local there")
+def test_a_path_written_on_another_operating_system_records_nothing(tmp_path):
+    write_manifest(tmp_path, [frame("D:\\clips\\cam1.mp4", "cam1")])
+    assert recorded_clips(tmp_path) == []
+
+
 def test_a_clip_whose_frames_were_all_deleted_holds_nothing(tmp_path):
     write_manifest(tmp_path, [frame("/d/cam1.mp4", "cam1", i) for i in range(3)])
     for png in tmp_path.glob("*.png"):
@@ -333,6 +378,16 @@ def test_one_file_listed_twice_is_described_once(tmp_path, monkeypatch):
     assert [line.split(" -> ")[1].split("  ")[0] for line in lines] == [
         "day1-cam1",
         "day2-cam1",
+    ]
+
+
+def test_a_clip_renamed_because_a_name_is_on_record_says_so(tmp_path):
+    new = tmp_path / "other" / "day1-cam1.mp4"
+    recorded = [(str(tmp_path / "day1" / "cam1.mp4"), "day1-cam1")]
+    names = assign_names([new], recorded)
+    assert describe_renames([new], names, recorded) == [
+        f"{new} -> other-day1-cam1"
+        "  (the name day1-cam1 is already used by another clip)"
     ]
 
 
