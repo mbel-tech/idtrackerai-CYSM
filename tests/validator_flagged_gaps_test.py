@@ -1,6 +1,8 @@
 """Flagging the Miss id gaps nobody else is near, and filling them in one go."""
 
+import importlib.util
 import os
+from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -9,18 +11,33 @@ import pytest  # noqa: E402
 from qtpy.QtCore import Qt  # noqa: E402
 from qtpy.QtWidgets import QApplication  # noqa: E402
 
-from idtrackerai.extra_tools.validator.widgets.errors_explorer import (  # noqa: E402
-    FLAG_COLUMN,
-    ErrorsExplorer,
+# Importing any part of the Validator package imports PyTorch, and CI installs
+# without it. gaps.py is plain NumPy, so it is loaded by path and its tests run
+# everywhere; the tests that need the widgets are skipped where PyTorch is
+# missing.
+GAPS_PATH = (
+    Path(__file__).parent.parent
+    / "src/idtrackerai/extra_tools/validator/widgets/gaps.py"
 )
-from idtrackerai.extra_tools.validator.widgets.gaps import (  # noqa: E402
-    find_gap_anchors,
-    gap_is_unambiguous,
-    interpolate_gap,
+_spec = importlib.util.spec_from_file_location("validator_gaps", GAPS_PATH)
+gaps = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(gaps)
+find_gap_anchors = gaps.find_gap_anchors
+gap_is_unambiguous = gaps.gap_is_unambiguous
+interpolate_gap = gaps.interpolate_gap
+
+HAS_TORCH = importlib.util.find_spec("torch") is not None
+needs_torch = pytest.mark.skipif(
+    not HAS_TORCH, reason="the Validator package imports PyTorch"
 )
-from idtrackerai.extra_tools.validator.widgets.interpolator import (  # noqa: E402
-    Interpolator,
-)
+if HAS_TORCH:
+    from idtrackerai.extra_tools.validator.widgets.errors_explorer import (  # noqa: E402
+        FLAG_COLUMN,
+        ErrorsExplorer,
+    )
+    from idtrackerai.extra_tools.validator.widgets.interpolator import (  # noqa: E402
+        Interpolator,
+    )
 
 app = QApplication.instance() or QApplication([])
 
@@ -48,7 +65,7 @@ def trajectories() -> np.ndarray:
     return traj
 
 
-def explorer_for(traj: np.ndarray) -> ErrorsExplorer:
+def explorer_for(traj: np.ndarray) -> "ErrorsExplorer":
     explorer = ErrorsExplorer()
     explorer.set_references(
         traj,
@@ -60,7 +77,7 @@ def explorer_for(traj: np.ndarray) -> ErrorsExplorer:
     return explorer
 
 
-def row_of(explorer: ErrorsExplorer, gap: tuple[int, int, int]) -> int:
+def row_of(explorer: "ErrorsExplorer", gap: tuple[int, int, int]) -> int:
     for row in range(explorer.table.rowCount()):
         if explorer.miss_id_gap(row) == gap:
             return row
@@ -125,6 +142,7 @@ class TestGaps:
         assert gap_is_unambiguous(traj, 0, 1, 8, 50)
 
 
+@needs_torch
 class TestErrorsExplorer:
     def test_only_miss_id_rows_have_something_to_check(self, trajectories):
         explorer = explorer_for(trajectories)
@@ -236,6 +254,7 @@ class FakeUndo:
         self.pushed.append((description, list(frames)))
 
 
+@needs_torch
 class TestBatchInterpolate:
     @pytest.fixture
     def interpolator(self, trajectories):
@@ -308,6 +327,7 @@ class TestBatchInterpolate:
         assert len(interpolator.blobs.added) == 10
 
 
+@needs_torch
 class TestInsideTheValidator:
     """The real Validator, with real blobs and the real Ctrl+Z, on a blank window."""
 
