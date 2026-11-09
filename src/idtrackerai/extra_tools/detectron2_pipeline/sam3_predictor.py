@@ -103,7 +103,50 @@ def resolve_checkpoint(weights) -> Path:
             " Without a network connection, download sam3.pt elsewhere and"
             " choose the file instead."
         ) from exc
-    return Path(path)
+    path = Path(path)
+    if _checkpoint_size(path) >= MIN_CHECKPOINT_BYTES:
+        return path
+
+    # A Hugging Face cache on a filesystem without symlinks (Google Drive on
+    # Colab, HF_HOME=/content/drive/...) leaves a tiny stub where sam3.pt should
+    # be, and torch.load then fails with "pop from empty list". Download a real
+    # copy to local disk instead of loading the stub.
+    local_dir = Path.home() / ".cache" / "idtrackerai" / "sam3"
+    print(
+        f"{path} is {_checkpoint_size(path)} bytes, not a 3.4 GB checkpoint (a"
+        " Hugging Face cache on Google Drive cannot hold its symlinks)."
+        f" Downloading a real copy to {local_dir}."
+    )
+    try:
+        path = Path(
+            hf_hub_download(
+                repo_id=sm.HUGGINGFACE_REPO,
+                filename=sm.SAM3_CHECKPOINT,
+                local_dir=str(local_dir),
+            )
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise Sam3WeightsError(
+            f"Could not download {sm.SAM3_CHECKPOINT} to {local_dir}: {exc}"
+        ) from exc
+    if _checkpoint_size(path) < MIN_CHECKPOINT_BYTES:
+        raise Sam3WeightsError(
+            f"{path} is only {_checkpoint_size(path)} bytes. Point HF_HOME at a"
+            " local disk (on Colab /content/hf_cache, not Google Drive), delete"
+            " the stub and run again, or pass the path of a full sam3.pt."
+        )
+    return path
+
+
+# sam3.pt is about 3.4 GB; anything under 1 GB is a stub or a broken download.
+MIN_CHECKPOINT_BYTES = 10**9
+
+
+def _checkpoint_size(path: Path) -> int:
+    try:
+        return path.stat().st_size
+    except OSError:
+        return 0
 
 
 # The sam3 wheel on PyPI (0.1.x) ships without its text-tokenizer vocabulary,

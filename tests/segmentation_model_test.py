@@ -508,6 +508,9 @@ def fake_hub(monkeypatch, tmp_path):
     hub = types.ModuleType("huggingface_hub")
     hub.hf_hub_download = lambda repo_id, filename, **kw: str(cached)
     monkeypatch.setitem(sys.modules, "huggingface_hub", hub)
+    from idtrackerai.extra_tools.detectron2_pipeline import sam3_predictor
+
+    monkeypatch.setattr(sam3_predictor, "MIN_CHECKPOINT_BYTES", 0)  # tiny stand-in
     return cached
 
 

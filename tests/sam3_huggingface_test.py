@@ -31,6 +31,10 @@ def fake_hub(monkeypatch, tmp_path):
     hub = types.ModuleType("huggingface_hub")
     hub.hf_hub_download = hf_hub_download
     monkeypatch.setitem(sys.modules, "huggingface_hub", hub)
+    from idtrackerai.extra_tools.detectron2_pipeline import sam3_predictor
+
+    # the stand-in file is tiny; size checks have their own tests below
+    monkeypatch.setattr(sam3_predictor, "MIN_CHECKPOINT_BYTES", 0)
     return hub, calls, cached
 
 
@@ -168,3 +172,38 @@ def test_the_template_is_valid_once_the_prompt_is_filled_in():
     assert spec["backend"] == "sam3"
     assert spec["weights"] == sm.HUGGINGFACE
     assert spec["prompt"] == "mouse"
+
+
+def test_a_stub_left_by_a_drive_cache_is_replaced_by_a_local_copy(
+    fake_hub, monkeypatch, tmp_path
+):
+    from idtrackerai.extra_tools.detectron2_pipeline import sam3_predictor as sp
+
+    hub, calls, stub = fake_hub
+    stub.write_bytes(b"x" * 79)
+    monkeypatch.setattr(sp, "MIN_CHECKPOINT_BYTES", 1000)
+    monkeypatch.setattr(sp.Path, "home", classmethod(lambda cls: tmp_path / "home"))
+    real = tmp_path / "home" / "real" / "sam3.pt"
+
+    def hf_hub_download(repo_id, filename, **kwargs):
+        calls.append(kwargs)
+        if "local_dir" not in kwargs:
+            return str(stub)
+        real.parent.mkdir(parents=True, exist_ok=True)
+        real.write_bytes(b"y" * 2000)
+        return str(real)
+
+    hub.hf_hub_download = hf_hub_download
+    assert sp.resolve_checkpoint("huggingface") == real
+    expected = tmp_path / "home" / ".cache" / "idtrackerai" / "sam3"
+    assert calls[-1]["local_dir"] == str(expected)
+
+
+def test_a_stub_that_cannot_be_replaced_says_to_move_the_cache(fake_hub, monkeypatch):
+    from idtrackerai.extra_tools.detectron2_pipeline import sam3_predictor as sp
+
+    _, _, stub = fake_hub
+    stub.write_bytes(b"x" * 79)
+    monkeypatch.setattr(sp, "MIN_CHECKPOINT_BYTES", 1000)
+    with pytest.raises(sp.Sam3WeightsError, match="HF_HOME"):
+        sp.resolve_checkpoint("huggingface")

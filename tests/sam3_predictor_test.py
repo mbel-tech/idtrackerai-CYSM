@@ -87,6 +87,7 @@ def fake_sam3(monkeypatch, tmp_path):
     vocab = tmp_path / sam3_predictor.BPE_NAME
     vocab.write_bytes(b"vocab")
     monkeypatch.setattr(sam3_predictor, "ensure_bpe_vocab", lambda: vocab)
+    monkeypatch.setattr(sam3_predictor, "MIN_CHECKPOINT_BYTES", 0)  # tiny stand-ins
 
     checkpoint = tmp_path / "sam3.pt"
     checkpoint.write_bytes(b"not really a checkpoint")
