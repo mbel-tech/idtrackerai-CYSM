@@ -76,6 +76,8 @@ def copy_to_drive(local_session: Path, drive_session: Path):
     tmp = drive_session.with_name(".copying_" + drive_session.name)
     shutil.rmtree(tmp, ignore_errors=True)
     shutil.copytree(local_session, tmp)
+    if drive_session.exists():          # os.replace cannot overwrite a non-empty folder
+        shutil.rmtree(drive_session)
     os.replace(tmp, drive_session)
 
 # usage
