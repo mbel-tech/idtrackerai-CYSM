@@ -70,8 +70,8 @@ def drop_metadata_sidecars(
 def idtrackerai_version() -> str:
     """The installed version, whatever the distribution happens to be called.
 
-    This fork is distributed as "idtrackerai-detectron2" so it is not mistaken
-    for an upstream release, while still importing as "idtrackerai". A lookup
+    This fork is distributed as "idtrackerai-CYSM" (formerly
+    "idtrackerai-detectron2") so it is not mistaken for an upstream release, while still importing as "idtrackerai". A lookup
     hardcoded to the import name therefore finds no metadata and raises, so the
     known names are tried in turn.
 
@@ -81,7 +81,7 @@ def idtrackerai_version() -> str:
     it takes tens of seconds, and this runs at import time, so the application
     appeared to hang on startup.
     """
-    for name in ("idtrackerai-detectron2", "idtrackerai"):
+    for name in ("idtrackerai-CYSM", "idtrackerai-detectron2", "idtrackerai"):
         try:
             return metadata.version(name)
         except metadata.PackageNotFoundError:

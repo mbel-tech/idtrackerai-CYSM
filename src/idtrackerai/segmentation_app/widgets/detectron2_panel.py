@@ -1167,7 +1167,7 @@ class Detectron2Panel(QWidget):
                 "LabelMe is not installed",
                 "Annotating needs LabelMe, which is an optional extra. Install "
                 "it into this environment with:\n\n"
-                f'  "{sys.executable}" -m pip install "idtrackerai-detectron2[annotate]"',
+                f'  "{sys.executable}" -m pip install "idtrackerai-CYSM[annotate]"',
             )
             return
 
