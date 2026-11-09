@@ -143,3 +143,28 @@ def test_a_refused_download_says_how_to_get_access(fake_hub):
     assert "hf auth login" in message
     # and what actually went wrong, for the case none of that is it
     assert "401 Client Error" in message
+
+
+# ------------------------------------------------------- the handoff template
+
+TEMPLATE = Path(__file__).resolve().parents[1] / "docs/sam3-session-template.toml"
+
+
+def _template_table() -> dict:
+    import toml
+
+    return toml.load(TEMPLATE)["segmentation_model"]
+
+
+def test_the_template_refuses_to_run_until_the_animal_is_named():
+    """Its prompt is left empty so nobody exports with someone else's word."""
+    with pytest.raises(sm.SegmentationModelError, match="needs a prompt"):
+        sm.normalize_model(_template_table())
+
+
+def test_the_template_is_valid_once_the_prompt_is_filled_in():
+    spec = sm.normalize_model(_template_table() | {"prompt": "mouse"})
+
+    assert spec["backend"] == "sam3"
+    assert spec["weights"] == sm.HUGGINGFACE
+    assert spec["prompt"] == "mouse"

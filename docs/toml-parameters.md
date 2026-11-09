@@ -52,7 +52,7 @@ Both stages read the same `.toml`:
 | Key | Default | Applies to | Meaning |
 |---|---|---|---|
 | `backend` | `'detectron2'` | both | `'detectron2'` (your fine-tuned Mask R-CNN) or `'sam3'` (prompted with a word). |
-| `weights` | **required** | both | Path to `model_final.pth`, or to `sam3.pt`. `'model_zoo'` loads the stock COCO checkpoint of `config` and needs `classes`. |
+| `weights` | **required** | both | Path to `model_final.pth`, or to `sam3.pt`. `'model_zoo'` loads the stock COCO checkpoint of `config` and needs `classes`. `'huggingface'` (sam3 only) fetches `sam3.pt` from Hugging Face, which needs a token with access. |
 | `contours_dir` | none | both | This session's contour folder, holding one `<video stem>.h5` per video. **Use one folder per session.** GoPro chapter names such as `GX010561` repeat across cameras. |
 | `score_threshold` | `0.7` | both | Detections scoring below this are dropped. |
 | `max_instances` | `number_of_animals` | both | Most detections kept per frame. Leave it unset so it follows the bird count for that pen and day. With SAM 3, `0` keeps every detection. |
@@ -125,7 +125,7 @@ The Segmentation App writes this table. A partial table is filled in from the de
 ## 6. Setting it from the Segmentation App
 
 - **Detectron2 with weights you already have:** go to *Segmentation → Detectron2 pipeline*, open step **6. Export contours**, and pick the `model_final.pth` under **Weights**. Then set the **Contours folder** and the **Score threshold**. Steps 1 to 5 are only for training a new model.
-- **SAM 3:** go to *Segmentation → SAM 3*, pick `sam3.pt`, and set the prompt, confidence and animals per frame.
+- **SAM 3:** go to *Segmentation → SAM 3*, pick `sam3.pt` or click **Use Hugging Face**, type the prompt (it starts empty), and set the confidence, animals per frame and **Contours folder**. **Copy command** gives the same export for a machine with a GPU.
 - **Save parameters** writes these choices as `[segmentation_model]`. Opening the `.toml` again restores them, and opens on that panel while the contours still need exporting. Choosing **Thresholding** drops the table.
 
 ## 7. Complete example: a broiler pen (Detectron2)
