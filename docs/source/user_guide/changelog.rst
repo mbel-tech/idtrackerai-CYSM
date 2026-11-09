@@ -200,6 +200,9 @@ Packaging changes
 
 - Distributed as ``idtrackerai-CYSM``. The import name is unchanged, so it
   cannot be installed alongside upstream idtracker.ai.
+- Published to PyPI, so ``pip install idtrackerai-CYSM`` installs it. A GitHub
+  release triggers the upload. Fork releases are versioned
+  ``<upstream base>.postN`` because PyPI rejects local version labels.
 - Fixed the version lookup failing under the fork's distribution name, which
   made the package raise at import time once installed, and made every
   tracking run raise before it started.

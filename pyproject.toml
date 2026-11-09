@@ -8,8 +8,10 @@ build-backend = "setuptools.build_meta"
 # upstream release. The import name is unchanged, so it cannot be installed
 # alongside upstream idtracker.ai in the same environment.
 name = "idtrackerai-CYSM"
-# Tracks the upstream version this fork is based on, with a local suffix.
-version = "6.0.15a0+cysm.1"
+# Tracks the upstream version this fork is based on. PyPI rejects local
+# version labels ("+cysm.1"), so fork releases are numbered with a .postN
+# suffix instead: bump N for each release made from the same upstream base.
+version = "6.0.15a0.post1"
 # Only the author of this fork's modifications is listed here. The
 # idtracker.ai authors are credited in NOTICE, README.md and CITATION.cff;
 # naming them in package metadata would suggest they maintain this fork or

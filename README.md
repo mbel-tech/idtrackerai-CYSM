@@ -95,7 +95,13 @@ footage.
 
 ## Using it
 
-Install as you would upstream idtracker.ai, from this repository:
+Install from PyPI:
+
+```bash
+pip install idtrackerai-CYSM
+```
+
+or, for the latest unreleased changes, straight from this repository:
 
 ```bash
 pip install git+https://github.com/mbel-tech/idtrackerai-CYSM

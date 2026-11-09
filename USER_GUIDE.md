@@ -101,7 +101,7 @@ pip3 install torch torchvision --index-url https://download.pytorch.org/whl/...
 Then this fork:
 
 ```bash
-pip install git+https://github.com/mbel-tech/idtrackerai-CYSM.git
+pip install idtrackerai-CYSM
 ```
 
 That brings LabelMe, which you will need for annotating in section 6. It does
