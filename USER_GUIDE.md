@@ -104,8 +104,18 @@ Then this fork:
 pip install git+https://github.com/mbel-tech/idtrackerai-CYSM.git
 ```
 
-That brings LabelMe, which you will need for annotating in section 6. It does
-**not** bring Detectron2 — that is only needed for training, it has no PyPI
+That does **not** bring LabelMe, which you will need for annotating in
+section 6: it is an optional extra called `annotate`. If you will annotate,
+install with the extra instead:
+
+```bash
+pip install "idtrackerai-CYSM[annotate] @ git+https://github.com/mbel-tech/idtrackerai-CYSM.git"
+```
+
+Or add it later, once the fork is installed, with
+`pip install "idtrackerai-CYSM[annotate]"` (the Detectron2 panel shows you this
+command, for the right Python, if you try to annotate without LabelMe). It also
+does **not** bring Detectron2 — that is only needed for training, it has no PyPI
 release, and it builds from source. Leave it until section 7.
 
 Check it worked:
