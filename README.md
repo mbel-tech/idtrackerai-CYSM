@@ -13,8 +13,7 @@ thresholding.
 
 The name says what it does: **CYSM — Choose Your Segmentation Model.** The
 segmentation step is the part you pick; the tracking around it stays
-idtracker.ai's. The project was previously called `idtrackerai-detectron2`,
-from when Detectron2 was the only option; old GitHub links redirect here.
+idtracker.ai's.
 
 **Identity tracking is untouched.** Crossing detection, fragmentation, the
 identification network and gap closing are upstream idtracker.ai's, unmodified.
@@ -108,13 +107,9 @@ The installed distribution is called `idtrackerai-CYSM` (that is the name
 (`import idtrackerai`), so it cannot be installed alongside upstream
 idtracker.ai in the same environment.
 
-If you installed it under its old name, remove that first so the two do not
-overwrite each other's files:
-
-```bash
-pip uninstall idtrackerai-detectron2
-pip install git+https://github.com/mbel-tech/idtrackerai-CYSM
-```
+If an earlier version of this fork is installed under a different
+distribution name, `pip uninstall` it first so the two do not overwrite each
+other's files.
 
 ### Preparing a model
 

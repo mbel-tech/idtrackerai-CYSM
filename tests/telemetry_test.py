@@ -13,8 +13,8 @@ from idtrackerai.utils.telemetry import ComparisonResult, parse_release
     [
         ("6.0.15", (6, 0, 15)),
         ("6.0.15a0", (6, 0, 15)),
-        ("6.0.15a0+detectron2.1", (6, 0, 15)),
-        ("6.0.15+detectron2.1", (6, 0, 15)),
+        ("6.0.15a0+cysm.1", (6, 0, 15)),
+        ("6.0.15+cysm.1", (6, 0, 15)),
         ("6.1.0b2", (6, 1, 0)),
         ("6.1.0rc1", (6, 1, 0)),
     ],
@@ -85,9 +85,9 @@ def _pypi(*versions):
 @pytest.mark.parametrize(
     "current, expected",
     [
-        ("6.0.15a0+detectron2.1", ComparisonResult.STABLE_RELEASE),
-        ("6.0.15+detectron2.1", ComparisonResult.EQUAL),
-        ("6.0.14+detectron2.1", ComparisonResult.PATCH_UPDATE),
+        ("6.0.15a0+cysm.1", ComparisonResult.STABLE_RELEASE),
+        ("6.0.15+cysm.1", ComparisonResult.EQUAL),
+        ("6.0.14+cysm.1", ComparisonResult.PATCH_UPDATE),
         ("5.9.0", ComparisonResult.MAJOR_UPDATE),
         ("6.0.15rc1", ComparisonResult.STABLE_RELEASE),
     ],

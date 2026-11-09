@@ -14,7 +14,6 @@ Read it before writing or editing any notebook that runs idtracker.ai.
 
 ## Repository
 
-The repository is `mbel-tech/idtrackerai-CYSM` (renamed from
-`idtrackerai-detectron2`; the pip distribution name is still
-`idtrackerai-detectron2`). Install from Colab with
+The repository is `mbel-tech/idtrackerai-CYSM`, and the pip distribution
+has the same name, `idtrackerai-CYSM`. Install from Colab with
 `pip install "git+https://github.com/mbel-tech/idtrackerai-CYSM.git"`.

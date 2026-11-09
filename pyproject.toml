@@ -9,7 +9,7 @@ build-backend = "setuptools.build_meta"
 # alongside upstream idtracker.ai in the same environment.
 name = "idtrackerai-CYSM"
 # Tracks the upstream version this fork is based on, with a local suffix.
-version = "6.0.15a0+detectron2.1"
+version = "6.0.15a0+cysm.1"
 # Only the author of this fork's modifications is listed here. The
 # idtracker.ai authors are credited in NOTICE, README.md and CITATION.cff;
 # naming them in package metadata would suggest they maintain this fork or
