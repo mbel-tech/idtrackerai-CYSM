@@ -106,6 +106,78 @@ def resolve_checkpoint(weights) -> Path:
     return Path(path)
 
 
+# The sam3 wheel on PyPI (0.1.x) ships without its text-tokenizer vocabulary,
+# which build_sam3_image_model looks for in <site-packages>/assets/. Building the
+# model then dies with FileNotFoundError before the first frame. The file is the
+# BPE vocabulary OpenAI's CLIP also uses; it is fetched once and checked by hash.
+BPE_NAME = "bpe_simple_vocab_16e6.txt.gz"
+BPE_SHA256 = "924691ac288e54409236115652ad4aa250f48203de50a9e4722a6ecd48d6804a"
+BPE_URLS = (
+    "https://raw.githubusercontent.com/facebookresearch/sam3/main/sam3/assets/"
+    + BPE_NAME,
+    "https://raw.githubusercontent.com/openai/CLIP/main/clip/" + BPE_NAME,
+)
+
+
+def _sha256(path: Path) -> str:
+    import hashlib  # noqa: PLC0415
+
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def ensure_bpe_vocab(sam3_dir: Path | None = None, cache_dir: Path | None = None) -> Path:
+    """The SAM 3 tokenizer vocabulary, fetched if the sam3 install lacks it.
+
+    Looks where sam3 itself looks (``<sam3 package>/../assets``) first. If it is
+    not there, the file is downloaded into ``cache_dir`` (default
+    ``~/.cache/idtrackerai``), so site-packages never needs to be writable.
+    """
+    if sam3_dir is None:
+        import importlib.util  # noqa: PLC0415
+
+        try:
+            spec = importlib.util.find_spec("sam3")
+        except (ImportError, ValueError):  # not installed, or a stand-in module
+            spec = None
+        sam3_dir = Path(spec.origin).parent if spec and spec.origin else None
+    if sam3_dir is not None:
+        shipped = Path(sam3_dir).parent / "assets" / BPE_NAME
+        if shipped.is_file():
+            return shipped
+
+    cache_dir = Path(cache_dir or Path.home() / ".cache" / "idtrackerai")
+    cached = cache_dir / BPE_NAME
+    if cached.is_file() and _sha256(cached) == BPE_SHA256:
+        return cached
+
+    import hashlib  # noqa: PLC0415
+    import urllib.request  # noqa: PLC0415
+
+    errors = []
+    for url in BPE_URLS:
+        try:
+            with urllib.request.urlopen(url, timeout=60) as response:  # noqa: S310
+                data = response.read()
+        except Exception as exc:  # noqa: BLE001
+            errors.append(f"{url}: {exc}")
+            continue
+        if hashlib.sha256(data).hexdigest() != BPE_SHA256:
+            errors.append(f"{url}: unexpected content")
+            continue
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        tmp = cached.with_suffix(".part")
+        tmp.write_bytes(data)
+        tmp.replace(cached)
+        print(f"SAM 3 tokenizer vocabulary fetched to {cached}")
+        return cached
+    raise FileNotFoundError(
+        f"SAM 3 needs its tokenizer vocabulary {BPE_NAME}, which the sam3 package"
+        " did not install, and it could not be downloaded:\n  "
+        + "\n  ".join(errors)
+        + f"\nDownload it by hand from {BPE_URLS[0]} and put it in {cache_dir}."
+    )
+
+
 def resolve_device(requested: str) -> str:
     """Picks a device, preferring the one asked for but never assuming CUDA.
 
@@ -162,7 +234,10 @@ class Sam3Predictor:
         # is the one that gets loaded, rather than a second one downloaded
         # silently into a cache.
         model = build_sam3_image_model(
-            checkpoint_path=str(checkpoint), load_from_HF=False, device=self.device
+            bpe_path=str(ensure_bpe_vocab()),
+            checkpoint_path=str(checkpoint),
+            load_from_HF=False,
+            device=self.device,
         )
         # The processor keeps its own device and its own confidence threshold,
         # and both of its defaults are wrong for us. device defaults to "cuda"

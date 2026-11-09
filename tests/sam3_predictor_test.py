@@ -43,9 +43,14 @@ def fake_sam3(monkeypatch, tmp_path):
     """Installs a stand-in sam3 (and torch) for the duration of one test."""
     built = {}
 
-    def build_sam3_image_model(checkpoint_path=None, load_from_HF=True, device="cuda"):
+    def build_sam3_image_model(
+        bpe_path=None, checkpoint_path=None, load_from_HF=True, device="cuda"
+    ):
         built.update(
-            checkpoint_path=checkpoint_path, load_from_HF=load_from_HF, device=device
+            bpe_path=bpe_path,
+            checkpoint_path=checkpoint_path,
+            load_from_HF=load_from_HF,
+            device=device,
         )
         return object()
 
@@ -76,6 +81,12 @@ def fake_sam3(monkeypatch, tmp_path):
     # quietly replace a real installation on a machine that has one
     if "torch" not in sys.modules:
         monkeypatch.setitem(sys.modules, "torch", torch)
+
+    from idtrackerai.extra_tools.detectron2_pipeline import sam3_predictor
+
+    vocab = tmp_path / sam3_predictor.BPE_NAME
+    vocab.write_bytes(b"vocab")
+    monkeypatch.setattr(sam3_predictor, "ensure_bpe_vocab", lambda: vocab)
 
     checkpoint = tmp_path / "sam3.pt"
     checkpoint.write_bytes(b"not really a checkpoint")
@@ -221,3 +232,75 @@ def test_huggingface_loads_the_downloaded_checkpoint(fake_sam3, monkeypatch, tmp
     make("huggingface")
 
     assert built["checkpoint_path"] == str(cached)
+
+
+def test_the_tokenizer_vocabulary_is_passed_to_sam3(fake_sam3, tmp_path):
+    checkpoint, built = fake_sam3
+    make(checkpoint)
+    assert built["bpe_path"] == str(tmp_path / "bpe_simple_vocab_16e6.txt.gz")
+
+
+def test_a_vocabulary_shipped_with_sam3_is_used_as_is(tmp_path):
+    from idtrackerai.extra_tools.detectron2_pipeline import sam3_predictor as sp
+
+    pkg = tmp_path / "site" / "sam3"
+    pkg.mkdir(parents=True)
+    shipped = tmp_path / "site" / "assets" / sp.BPE_NAME
+    shipped.parent.mkdir()
+    shipped.write_bytes(b"anything")
+    assert sp.ensure_bpe_vocab(sam3_dir=pkg, cache_dir=tmp_path / "cache") == shipped
+
+
+def test_a_missing_vocabulary_is_fetched_once_and_checked(tmp_path, monkeypatch):
+    import hashlib
+    import urllib.request
+
+    from idtrackerai.extra_tools.detectron2_pipeline import sam3_predictor as sp
+
+    payload = b"the real vocabulary"
+    monkeypatch.setattr(sp, "BPE_SHA256", hashlib.sha256(payload).hexdigest())
+    calls = []
+
+    class Response:
+        def __init__(self, data):
+            self.data = data
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def read(self):
+            return self.data
+
+    def urlopen(url, timeout=None):
+        calls.append(url)
+        # the first mirror serves something else; the hash check must skip it
+        return Response(b"wrong" if len(calls) == 1 else payload)
+
+    monkeypatch.setattr(urllib.request, "urlopen", urlopen)
+    pkg = tmp_path / "site" / "sam3"
+    pkg.mkdir(parents=True)
+    got = sp.ensure_bpe_vocab(sam3_dir=pkg, cache_dir=tmp_path / "cache")
+    assert got == tmp_path / "cache" / sp.BPE_NAME
+    assert got.read_bytes() == payload
+    assert len(calls) == 2
+    # second call reads the cache, no network
+    assert sp.ensure_bpe_vocab(sam3_dir=pkg, cache_dir=tmp_path / "cache") == got
+    assert len(calls) == 2
+
+
+def test_an_unreachable_vocabulary_says_where_to_put_it(tmp_path, monkeypatch):
+    import urllib.request
+
+    from idtrackerai.extra_tools.detectron2_pipeline import sam3_predictor as sp
+
+    def urlopen(url, timeout=None):
+        raise OSError("offline")
+
+    monkeypatch.setattr(urllib.request, "urlopen", urlopen)
+    pkg = tmp_path / "site" / "sam3"
+    pkg.mkdir(parents=True)
+    with pytest.raises(FileNotFoundError, match="put it in"):
+        sp.ensure_bpe_vocab(sam3_dir=pkg, cache_dir=tmp_path / "cache")
