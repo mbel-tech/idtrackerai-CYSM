@@ -98,25 +98,25 @@ the URL differs per machine:
 pip3 install torch torchvision --index-url https://download.pytorch.org/whl/...
 ```
 
-Then this fork:
-
-```bash
-pip install git+https://github.com/mbel-tech/idtrackerai-CYSM.git
-```
-
-That does **not** bring LabelMe, which you will need for annotating in
-section 6: it is an optional extra called `annotate`. If you will annotate,
-install with the extra instead:
+Then this fork, with LabelMe, which you will need for annotating in section 6.
+LabelMe is an optional extra called `annotate`, so ask for it by name:
 
 ```bash
 pip install "idtrackerai-CYSM[annotate] @ git+https://github.com/mbel-tech/idtrackerai-CYSM.git"
 ```
 
-Or add it later, once the fork is installed, with
-`pip install "idtrackerai-CYSM[annotate]"` (the Detectron2 panel shows you this
-command, for the right Python, if you try to annotate without LabelMe). It also
-does **not** bring Detectron2 — that is only needed for training, it has no PyPI
-release, and it builds from source. Leave it until section 7.
+If you will not annotate on this machine, the plain install leaves LabelMe out:
+
+```bash
+pip install git+https://github.com/mbel-tech/idtrackerai-CYSM.git
+```
+
+You can add LabelMe later with `pip install "idtrackerai-CYSM[annotate]"`. The
+Detectron2 panel shows you that command, for the right Python, if you try to
+annotate without it.
+
+Neither install brings Detectron2 — that is only needed for training, it has
+no PyPI release, and it builds from source. Leave it until section 7.
 
 Check it worked:
 
