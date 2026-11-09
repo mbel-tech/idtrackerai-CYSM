@@ -113,6 +113,23 @@ def weights_sha256(weights) -> str:
     return file_sha256(Path(weights))
 
 
+def local_weights(backend: str, weights):
+    """The weights as a file on this machine, for hashing and loading.
+
+    Only SAM 3 has anything to resolve: ``huggingface`` becomes the cached
+    sam3.pt, downloaded first if need be. Done before the hash, so a contour
+    file records the checkpoint it was really made with.
+    """
+    if backend != "sam3":
+        return weights
+    try:
+        from .sam3_predictor import resolve_checkpoint
+    except ImportError:  # loaded by path, e.g. from a Colab bundle
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from sam3_predictor import resolve_checkpoint  # type: ignore[no-redef]
+    return resolve_checkpoint(weights)
+
+
 def video_frame_count(video: Path) -> int:
     cap = cv2.VideoCapture(str(video))
     try:
@@ -802,7 +819,8 @@ def main():
         "--weights",
         type=Path,
         help="model_final.pth (or sam3.pt); 'model_zoo' for the COCO checkpoint"
-        " of --config, not fine-tuned",
+        " of --config, not fine-tuned; 'huggingface' to fetch sam3.pt (gated:"
+        " needs a token from an account granted access)",
     )
     target = parser.add_mutually_exclusive_group()
     target.add_argument("--output", type=Path, help="contour file, with --video")
@@ -928,6 +946,8 @@ def main():
         args.classes = sorted(set(args.classes))
     if str(args.weights) == "model_zoo" and args.backend != "detectron2":
         parser.error("--weights model_zoo only applies to --backend detectron2")
+    if str(args.weights).lower() == sm.HUGGINGFACE and args.backend != "sam3":
+        parser.error("--weights huggingface only applies to --backend sam3")
 
     if args.videos and not args.output_dir:
         parser.error("--videos needs --output-dir")
@@ -1011,6 +1031,10 @@ def main():
         key = video.resolve().relative_to(root).as_posix()
         return f"{key}#limit{args.limit}" if args.limit else key
 
+    try:
+        args.weights = local_weights(args.backend, args.weights)
+    except RuntimeError as exc:  # Sam3WeightsError: a refused download, explained
+        raise SystemExit(str(exc)) from exc
     args.weights_sha256 = weights_sha256(args.weights)
 
     def needs_export(video: Path) -> bool:
@@ -1270,6 +1294,13 @@ def session_main(args) -> None:
     for group in groups.values():
         spec, max_instances = group[0]["spec"], group[0]["max_instances"]
         run_args = _args_for(args, spec, max_instances)
+        try:
+            run_args.weights = local_weights(run_args.backend, run_args.weights)
+        except RuntimeError as exc:  # Sam3WeightsError: a refused download
+            for job in group:
+                failed.append(job["video"].name)
+            print(f"ERROR: {exc}")
+            continue
         if run_args.weights != sm.MODEL_ZOO and not Path(run_args.weights).is_file():
             for job in group:
                 failed.append(job["video"].name)

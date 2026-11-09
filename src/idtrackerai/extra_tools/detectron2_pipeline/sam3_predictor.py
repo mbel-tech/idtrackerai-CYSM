@@ -48,10 +48,62 @@ If masks turn out to break down through occlusions, SAM 3's video mode is the
 escalation, and it would mean buffering frames rather than streaming them.
 """
 
+import sys
 from pathlib import Path
 
 import cv2
 import numpy as np
+
+try:
+    from . import segmentation_model as sm
+except ImportError:  # loaded by path, e.g. from a Colab bundle
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    import segmentation_model as sm  # type: ignore[no-redef]
+
+
+class Sam3WeightsError(RuntimeError):
+    """The SAM 3 checkpoint could not be fetched from Hugging Face."""
+
+
+def resolve_checkpoint(weights) -> Path:
+    """The local sam3.pt to load: the path given, or the official one fetched.
+
+    ``"huggingface"`` (any case) downloads sam3.pt from the gated
+    facebook/sam3 repository into the Hugging Face cache, once, and returns the
+    cached file. Everything downstream -- hashing, provenance, loading -- then
+    sees an ordinary file, so a fetched checkpoint and a chosen one behave the
+    same. Anything else is taken as a path and returned unchanged.
+
+    The download needs a token from an account that was granted access. It is
+    read the usual Hugging Face ways: ``HF_TOKEN``, or ``hf auth login``.
+    """
+    if str(weights).strip().lower() != sm.HUGGINGFACE:
+        return Path(weights)
+
+    try:
+        from huggingface_hub import hf_hub_download  # noqa: PLC0415
+    except ImportError as exc:
+        raise Sam3WeightsError(
+            'weights = "huggingface" needs the huggingface_hub package:'
+            "  pip install huggingface_hub"
+        ) from exc
+
+    print(
+        f"Fetching {sm.SAM3_CHECKPOINT} from Hugging Face ({sm.HUGGINGFACE_REPO});"
+        " about 3.4 GB the first time, then read from the cache."
+    )
+    try:
+        path = hf_hub_download(repo_id=sm.HUGGINGFACE_REPO, filename=sm.SAM3_CHECKPOINT)
+    except Exception as exc:  # noqa: BLE001 - every failure gets the same advice
+        raise Sam3WeightsError(
+            f"Could not download {sm.SAM3_CHECKPOINT} from Hugging Face: {exc}\n\n"
+            f"The checkpoint is gated. Request access once at"
+            f" https://huggingface.co/{sm.HUGGINGFACE_REPO}, then give this machine"
+            " a token from that account: run  hf auth login  or set HF_TOKEN."
+            " Without a network connection, download sam3.pt elsewhere and"
+            " choose the file instead."
+        ) from exc
+    return Path(path)
 
 
 def resolve_device(requested: str) -> str:
@@ -91,12 +143,13 @@ class Sam3Predictor:
         from sam3.model_builder import build_sam3_image_model  # noqa: PLC0415
         from sam3.model.sam3_image_processor import Sam3Processor  # noqa: PLC0415
 
-        checkpoint = Path(checkpoint)
+        checkpoint = resolve_checkpoint(checkpoint)
         if not checkpoint.is_file():
             raise FileNotFoundError(
                 f"SAM 3 checkpoint not found: {checkpoint}. Download sam3.pt "
                 "from the facebook/sam3 repository on Hugging Face (access "
-                "must be requested) and pass it with --weights."
+                "must be requested) and pass it with --weights, or pass"
+                " --weights huggingface to have it fetched."
             )
 
         self.device = resolve_device(device)
@@ -109,9 +162,7 @@ class Sam3Predictor:
         # is the one that gets loaded, rather than a second one downloaded
         # silently into a cache.
         model = build_sam3_image_model(
-            checkpoint_path=str(checkpoint),
-            load_from_HF=False,
-            device=self.device,
+            checkpoint_path=str(checkpoint), load_from_HF=False, device=self.device
         )
         # The processor keeps its own device and its own confidence threshold,
         # and both of its defaults are wrong for us. device defaults to "cuda"

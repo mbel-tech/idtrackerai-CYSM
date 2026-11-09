@@ -69,6 +69,14 @@ DETECTRON2_ONLY = ("config", "num_classes", "min_size", "classes")
 MODEL_ZOO = "model_zoo"
 COCO_BIRD = 14
 
+# weights = "huggingface" fetches SAM 3's official checkpoint, sam3.pt, from
+# the gated facebook/sam3 repository instead of a file chosen by hand. It is
+# downloaded once into the Hugging Face cache, and the exporter records the
+# downloaded file's name and hash exactly as it would for a chosen one.
+HUGGINGFACE = "huggingface"
+HUGGINGFACE_REPO = "facebook/sam3"
+SAM3_CHECKPOINT = "sam3.pt"
+
 
 class SegmentationModelError(ValueError):
     """The [segmentation_model] table is invalid, or the contour files do not
@@ -142,6 +150,12 @@ def normalize_model(spec: dict | None) -> dict | None:
         if out["backend"] != "detectron2":
             raise SegmentationModelError(
                 'weights = "model_zoo" only applies to backend = "detectron2"'
+            )
+    elif out["weights"].lower() == HUGGINGFACE:
+        out["weights"] = HUGGINGFACE
+        if out["backend"] != "sam3":
+            raise SegmentationModelError(
+                'weights = "huggingface" only applies to backend = "sam3"'
             )
     if out["contours_dir"] is not None:
         out["contours_dir"] = str(out["contours_dir"])
@@ -319,8 +333,16 @@ def exported_intervals_of(attrs: dict) -> list[list[int]] | None:
 
 
 def weights_label(spec: dict) -> str:
-    """What the exporter records as ``weights``: the file name, or model_zoo."""
-    return MODEL_ZOO if spec["weights"] == MODEL_ZOO else Path(spec["weights"]).name
+    """What the exporter records as ``weights``: the file name, or model_zoo.
+
+    A checkpoint fetched from Hugging Face is a file called sam3.pt by the
+    time the exporter sees it, so that is what it records.
+    """
+    if spec["weights"] == MODEL_ZOO:
+        return MODEL_ZOO
+    if spec["weights"] == HUGGINGFACE:
+        return SAM3_CHECKPOINT
+    return Path(spec["weights"]).name
 
 
 def _close(a, b) -> bool:
@@ -335,10 +357,7 @@ def _text(value) -> str:
 
 
 def mismatches(
-    attrs: dict,
-    spec: dict,
-    max_instances: int,
-    weights_sha256: str | None = None,
+    attrs: dict, spec: dict, max_instances: int, weights_sha256: str | None = None
 ) -> list[str]:
     """How a contour file's provenance differs from the model table.
 

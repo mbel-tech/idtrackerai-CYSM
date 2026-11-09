@@ -267,8 +267,7 @@ def write_session(tmp_path, name, videos, **params) -> Path:
 
     path = tmp_path / f"{name}.toml"
     path.write_text(
-        toml.dumps({"video_paths": [str(v) for v in videos]} | params),
-        encoding="utf-8",
+        toml.dumps({"video_paths": [str(v) for v in videos]} | params), encoding="utf-8"
     )
     return path
 
@@ -495,3 +494,136 @@ def test_sam3_tables():
     ]
     detectron2 = sm.normalize_model({"weights": "sam3.pt"})
     assert any("backend" in p for p in sm.mismatches(attrs, detectron2, 9))
+
+
+@pytest.fixture
+def fake_hub(monkeypatch, tmp_path):
+    """A stand-in huggingface_hub whose download is a small local file."""
+    import sys
+    import types
+
+    cached = tmp_path / "hf-cache" / "sam3.pt"
+    cached.parent.mkdir()
+    cached.write_bytes(b"not really sam3")
+    hub = types.ModuleType("huggingface_hub")
+    hub.hf_hub_download = lambda repo_id, filename, **kw: str(cached)
+    monkeypatch.setitem(sys.modules, "huggingface_hub", hub)
+    return cached
+
+
+def test_sam3_from_hugging_face_exports_and_tracks_from_one_toml(
+    tmp_path, monkeypatch, fake_hub
+):
+    """weights = "huggingface" in the .toml: no file to choose or copy around.
+
+    The exporter fetches the checkpoint, records the downloaded file's name and
+    hash as it would a chosen one, and tracking accepts the result.
+    """
+    import sys
+
+    from idtrackerai.extra_tools.detectron2_pipeline import inference
+    from idtrackerai.extra_tools.detectron2_pipeline.inference import file_sha256
+
+    video = make_video(tmp_path / "clip.avi")
+    contours_dir = tmp_path / "contours"
+    table = {
+        "backend": "sam3",
+        "weights": "huggingface",
+        "prompt": "bird",
+        "contours_dir": str(contours_dir),
+        "min_component": 0,
+        "dilate": 0,
+    }
+    toml_path = write_session(
+        tmp_path, "pen1", [video], number_of_animals=1, segmentation_model=table
+    )
+    loaded = []
+    predictor = FakePredictor()
+
+    def build(args, meta):
+        loaded.append(Path(args.weights))
+        return predictor, "fake sam3"
+
+    monkeypatch.setattr(inference, "build_predictor", build)
+    monkeypatch.setattr(
+        sys, "argv", ["idtrackerai_d2_export", "--session", str(toml_path)]
+    )
+    inference.main()
+
+    assert loaded == [fake_hub]
+    with h5py.File(contours_dir / "clip.h5") as file:
+        attrs = dict(file.attrs)
+    assert attrs["weights"] == "sam3.pt"
+    assert attrs["weights_sha256"] == file_sha256(fake_hub)
+    assert attrs["prompt"] == "bird"
+
+    session = tracking_session(tmp_path, video, segmentation_model=table)
+    session.prepare_tracking()  # accepted: same model, same prompt
+
+
+def test_the_videos_command_line_takes_huggingface_too(tmp_path, monkeypatch, fake_hub):
+    """The command the SAM 3 panel builds for a GPU machine."""
+    import sys
+
+    from idtrackerai.extra_tools.detectron2_pipeline import inference
+    from idtrackerai.extra_tools.detectron2_pipeline.inference import file_sha256
+
+    video = make_video(tmp_path / "clip.avi")
+    out = tmp_path / "contours"
+    monkeypatch.setattr(
+        inference, "build_predictor", lambda args, meta: (FakePredictor(), "fake sam3")
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "idtrackerai_d2_export",
+            "--backend",
+            "sam3",
+            "--prompt",
+            "bird",
+            "--weights",
+            "huggingface",
+            "--videos",
+            str(video),
+            "--output-dir",
+            str(out),
+            "--max-instances",
+            "0",
+            "--min-component",
+            "0",
+            "--dilate",
+            "0",
+        ],
+    )
+    inference.main()
+
+    with h5py.File(out / "clip.h5") as file:
+        assert file.attrs["weights_sha256"] == file_sha256(fake_hub)
+        assert file.attrs["weights"] == "sam3.pt"
+
+
+def test_huggingface_weights_are_refused_for_detectron2(tmp_path, monkeypatch, capsys):
+    import sys
+
+    from idtrackerai.extra_tools.detectron2_pipeline import inference
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "idtrackerai_d2_export",
+            "--weights",
+            "huggingface",
+            "--videos",
+            str(tmp_path / "clip.avi"),
+            "--output-dir",
+            str(tmp_path),
+        ],
+    )
+    with pytest.raises(SystemExit):
+        inference.main()
+    assert (
+        "--weights huggingface only applies to --backend sam3"
+        in capsys.readouterr().err
+    )
