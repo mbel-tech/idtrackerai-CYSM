@@ -561,6 +561,95 @@ def test_sam3_from_hugging_face_exports_and_tracks_from_one_toml(
     session.prepare_tracking()  # accepted: same model, same prompt
 
 
+def test_sam3_session_export_uses_the_sessions_enhancement(
+    tmp_path, monkeypatch, fake_hub
+):
+    """SAM 3 has no training record, so --session takes the .toml's own
+    `enhancement` key, as the Segmentation App's SAM 3 export does.
+
+    Otherwise contours exported from the app with a non-default enhancement
+    would read as out of date here and be redone with other settings.
+    """
+    import sys
+
+    from idtrackerai.extra_tools.detectron2_pipeline import inference
+    from idtrackerai.extra_tools.detectron2_pipeline import preprocessing as fp
+
+    video = make_video(tmp_path / "clip.avi")
+    contours_dir = tmp_path / "contours"
+    table = {
+        "backend": "sam3",
+        "weights": "huggingface",
+        "prompt": "bird",
+        "contours_dir": str(contours_dir),
+        "min_component": 0,
+        "dilate": 0,
+    }
+    toml_path = write_session(
+        tmp_path,
+        "pen1",
+        [video],
+        number_of_animals=1,
+        segmentation_model=table,
+        enhancement={"enhance": False},
+    )
+    predictor = FakePredictor()
+    monkeypatch.setattr(
+        inference, "build_predictor", lambda args, meta: (predictor, "fake sam3")
+    )
+    monkeypatch.setattr(
+        sys, "argv", ["idtrackerai_d2_export", "--session", str(toml_path)]
+    )
+    inference.main()
+
+    no_enhance, _ = fp.resolve_settings(Namespace(no_enhance=True))
+    with h5py.File(contours_dir / "clip.h5") as file:
+        assert json.loads(file.attrs["enhancement"]) == no_enhance
+    assert predictor.frames_seen  # it ran
+
+    # the file matches the session, so a second run leaves it alone
+    predictor.frames_seen.clear()
+    inference.main()
+    assert predictor.frames_seen == []
+
+    # a flag on the command line still wins over the session's key
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["idtrackerai_d2_export", "--session", str(toml_path), "--enhance"],
+    )
+    inference.main()
+    assert predictor.frames_seen
+    with h5py.File(contours_dir / "clip.h5") as file:
+        assert json.loads(file.attrs["enhancement"])["enhance"] is True
+
+
+def test_one_sam3_clip_in_two_sessions_needs_one_enhancement(tmp_path):
+    a = make_video(tmp_path / "clip.avi")
+    table = {"backend": "sam3", "weights": "sam3.pt", "prompt": "bird",
+             "contours_dir": str(tmp_path / "c")}
+    s1 = write_session(tmp_path, "s1", [a], number_of_animals=2,
+                       segmentation_model=table, enhancement={"enhance": False})
+    s2 = write_session(tmp_path, "s2", [a], number_of_animals=2,
+                       segmentation_model=table)
+    with pytest.raises(SystemExit, match="different enhancement"):
+        session_jobs([s1, s2])
+
+    typo = write_session(tmp_path, "s3", [a], number_of_animals=2,
+                         segmentation_model=table, enhancement={"enhanse": False})
+    with pytest.raises(SystemExit, match="s3.toml.*enhanse"):
+        session_jobs([typo])
+
+    # Detectron2 exports with its training record's enhancement, so the
+    # session's key does not split one clip between two sessions
+    d2 = {"weights": "w.pth", "contours_dir": str(tmp_path / "d")}
+    d1 = write_session(tmp_path, "d1", [a], number_of_animals=2,
+                       segmentation_model=d2, enhancement={"enhance": False})
+    d2_ = write_session(tmp_path, "d2", [a], number_of_animals=2,
+                        segmentation_model=d2)
+    assert len(session_jobs([d1, d2_])) == 1
+
+
 def test_the_videos_command_line_takes_huggingface_too(tmp_path, monkeypatch, fake_hub):
     """The command the SAM 3 panel builds for a GPU machine."""
     import sys

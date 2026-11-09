@@ -1225,6 +1225,16 @@ def session_jobs(toml_paths, frame_count=video_frame_count) -> list[dict]:
                 fail(f"OpenCV cannot count the frames of {video}")
         per_video = sm.local_intervals(params.get("tracking_intervals"), n_frames)
 
+        # SAM 3 is never trained here, so it has no training record to take
+        # its enhancement from; it sees what the session's own `enhancement`
+        # key says, as in the Segmentation App. Detectron2 keeps the training
+        # record's, so the key plays no part in its export.
+        enhancement = None
+        if spec["backend"] == "sam3":
+            try:
+                enhancement = fp.normalize_settings(params.get("enhancement"))
+            except fp.PreprocessingError as exc:
+                fail(str(exc))
         model_key = json.dumps(
             {k: v for k, v in spec.items() if k != "contours_dir"}
             | {"max_instances": max_instances},
@@ -1246,6 +1256,12 @@ def session_jobs(toml_paths, frame_count=video_frame_count) -> list[dict]:
                         " different [segmentation_model] or number of animals;"
                         " one contour file cannot serve both"
                     )
+                if job["enhancement"] != enhancement:
+                    fail(
+                        f"{video.name} is also in {job['session']} with a"
+                        " different enhancement, which SAM 3 exports with;"
+                        " one contour file cannot serve both"
+                    )
                 job["intervals"] = sm.normalize_intervals(
                     job["intervals"] + intervals, job["n_frames"]
                 )
@@ -1260,6 +1276,7 @@ def session_jobs(toml_paths, frame_count=video_frame_count) -> list[dict]:
                 "spec": spec,
                 "max_instances": max_instances,
                 "model_key": model_key,
+                "enhancement": enhancement,
             }
     if not jobs:
         raise SystemExit("No session files matched")
@@ -1287,7 +1304,8 @@ def session_main(args) -> None:
 
     groups: dict[str, list[dict]] = {}
     for job in jobs:
-        groups.setdefault(job["model_key"], []).append(job)
+        group_key = (job["model_key"], json.dumps(job["enhancement"], sort_keys=True))
+        groups.setdefault(group_key, []).append(job)
 
     failed: list[str] = []
     exported = 0
@@ -1312,9 +1330,14 @@ def session_main(args) -> None:
             if run_args.backend == "detectron2" and run_args.weights != sm.MODEL_ZOO
             else None
         )
-        trained_with = (metadata or {}).get("enhancement")
+        if run_args.backend == "sam3":
+            # never trained here: the session's enhancement, flags over it
+            fallback, label = group[0]["enhancement"], "the session's enhancement key"
+        else:
+            fallback = (metadata or {}).get("enhancement")
+            label = "the model's training record"
         enhancement, notes = fp.resolve_settings(
-            run_args, fallback=trained_with, fallback_label="the model's training record"
+            run_args, fallback=fallback, fallback_label=label
         )
         for note in notes:
             print(note)
