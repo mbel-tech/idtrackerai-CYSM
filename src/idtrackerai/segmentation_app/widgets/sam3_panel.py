@@ -26,10 +26,12 @@ bundle the Detectron2 stages already use.
 """
 
 import logging
+import sys
 from pathlib import Path
 
-from qtpy.QtCore import Qt, Signal  # type: ignore[reportPrivateImportUsage]
+from qtpy.QtCore import QTimer, Signal  # type: ignore[reportPrivateImportUsage]
 from qtpy.QtWidgets import (
+    QApplication,
     QCheckBox,
     QDoubleSpinBox,
     QFileDialog,
@@ -39,6 +41,7 @@ from qtpy.QtWidgets import (
     QLabel,
     QLineEdit,
     QMessageBox,
+    QPlainTextEdit,
     QProgressDialog,
     QPushButton,
     QSpinBox,
@@ -47,6 +50,7 @@ from qtpy.QtWidgets import (
 )
 
 from idtrackerai.extra_tools.detectron2_pipeline import gpu as gpu_mod
+from idtrackerai.extra_tools.detectron2_pipeline import preprocessing as fp
 from idtrackerai.extra_tools.detectron2_pipeline import sampling as sampling_mod
 from idtrackerai.extra_tools.detectron2_pipeline import segmentation_model as sm
 from idtrackerai.GUI_tools import WrappedLabel
@@ -105,26 +109,44 @@ class Sam3Panel(QWidget):
         self.weights_label.setText("No sam3.pt chosen")
         self.weights_button = QPushButton("Choose sam3.pt")
         self.weights_button.clicked.connect(self.choose_weights)
+        # sam3.pt is gated, so most people do not have the file to hand; this
+        # fetches it instead, at the first run, from an account given access
+        self.hf_button = QPushButton("Use Hugging Face")
+        self.hf_button.clicked.connect(self.use_huggingface)
 
-        self.prompt = QLineEdit("fish")
+        # Empty on purpose: the prompt is the animal, and a pre-filled word
+        # would be run on whatever animal is in the video by anyone who did not
+        # notice it. Export and Draft stay disabled until something is typed.
+        self.prompt = QLineEdit()
         self.prompt.setPlaceholderText("the animal, e.g. fish")
+        self.prompt.textChanged.connect(lambda _text: self._refresh_enabled())
 
         self.score_threshold = QDoubleSpinBox()
         self.score_threshold.setRange(0.0, 1.0)
         self.score_threshold.setSingleStep(0.05)
         self.score_threshold.setValue(0.5)
+        self.score_threshold.valueChanged.connect(
+            lambda _v: self._update_export_command()
+        )
 
         self.max_instances = QSpinBox()
         self.max_instances.setRange(0, 1000)
         self.max_instances.setValue(0)
         self.max_instances.setSpecialValueText("all")
+        self.max_instances.valueChanged.connect(
+            lambda _v: self._update_export_command()
+        )
 
         self.gpu_status = WrappedLabel()
         self.gpu_status.setText(self._gpu_text())
 
+        weight_buttons = QVBoxLayout()
+        weight_buttons.addWidget(self.weights_button)
+        weight_buttons.addWidget(self.hf_button)
+
         grid.addWidget(QLabel("Weights"), 0, 0)
         grid.addWidget(self.weights_label, 0, 1)
-        grid.addWidget(self.weights_button, 0, 2)
+        grid.addLayout(weight_buttons, 0, 2)
         grid.addWidget(QLabel("Prompt"), 1, 0)
         grid.addWidget(self.prompt, 1, 1, 1, 2)
         grid.addWidget(QLabel("Confidence"), 2, 0)
@@ -176,11 +198,21 @@ class Sam3Panel(QWidget):
         self.export_explanation.setText(
             "Writes one contour file per clip, the same format the Detectron2 "
             "pipeline produces. When it finishes, this session switches to "
-            "those contours automatically.' + N + N + '"
+            "those contours automatically.\n\n"
             "Clips that already have a contour file are skipped, so a run that "
             "was cancelled can be picked up where it stopped."
         )
         layout.addWidget(self.export_explanation)
+
+        row = QHBoxLayout()
+        row.addWidget(QLabel("Contours folder"))
+        self.contours_field = QLineEdit()
+        self.contours_field.setReadOnly(True)
+        self.contours_button = QPushButton("Choose folder...")
+        self.contours_button.clicked.connect(self.choose_contours_dir)
+        row.addWidget(self.contours_field)
+        row.addWidget(self.contours_button)
+        layout.addLayout(row)
 
         self.reexport = QCheckBox("Re-export clips that already have contours")
         layout.addWidget(self.reexport)
@@ -189,12 +221,29 @@ class Sam3Panel(QWidget):
         self.export_button.clicked.connect(self.run_export)
         layout.addWidget(self.export_button)
 
+        # The same export as a command, as the Detectron2 export step offers,
+        # for running where the GPU is and for leaving running for hours in
+        # a terminal rather than behind this window.
+        command_label = WrappedLabel()
+        command_label.setText(
+            "Or run the same export from a terminal, on a machine with a GPU:"
+        )
+        layout.addWidget(command_label)
+        self.export_command = QPlainTextEdit()
+        self.export_command.setReadOnly(True)
+        self.export_command.setMaximumHeight(96)
+        layout.addWidget(self.export_command)
+        self.copy_command_button = QPushButton("Copy command")
+        self.copy_command_button.clicked.connect(self.copy_export_command)
+        layout.addWidget(self.copy_command_button)
+
         self.colab_hint = WrappedLabel()
         self.colab_hint.setText(
-            "Without a GPU here, run this stage in Colab instead: build the "
-            "bundle with idtrackerai_d2_bundle, upload it with sam3.pt, and "
-            "use section 8 of the notebook. Then come back and load the "
-            "contour files through External contours."
+            "Without a GPU here, run the command above on a machine that has "
+            "one, or run this stage in Colab: build the bundle with "
+            "idtrackerai_d2_bundle, upload it (with sam3.pt, unless the weights "
+            "come from Hugging Face), and use section 8 of the notebook. Then "
+            "come back and load the contour files through External contours."
         )
         layout.addWidget(self.colab_hint)
         return box
@@ -247,31 +296,70 @@ class Sam3Panel(QWidget):
     def enhancement_committed(self, settings: dict) -> None:
         """The export applies the same enhancement the rest of the app does."""
         self._enhancement = dict(settings)
+        self._update_export_command()
 
     def settings(self) -> dict:
         if not hasattr(self, "_enhancement"):
             self._enhancement = dict(self.enhancement.settings())
         return self._enhancement
 
+    def prompt_text(self) -> str:
+        return self.prompt.text().strip()
+
     def _refresh_enabled(self) -> None:
-        ready = self.weights is not None and bool(self.prompt.text().strip())
+        ready = self.weights is not None and bool(self.prompt_text())
         self.prelabel_button.setEnabled(ready and self.frames_dir is not None)
         # A whole video on CPU is not a slow run, it is an impossible one.
         self.export_button.setEnabled(
             ready and bool(self.video_paths) and self.has_gpu
         )
         self.colab_hint.setVisible(not self.has_gpu)
+        self.contours_field.setText(str(self.export_dir()))
+        self._update_export_command()
 
     # ------------------------------------------------------------- user input
+    def uses_huggingface(self) -> bool:
+        return self.weights is not None and str(self.weights) == sm.HUGGINGFACE
+
+    def _set_weights(self, weights: Path | None) -> None:
+        self.weights = weights
+        if weights is None:
+            text = "No sam3.pt chosen"
+        elif self.uses_huggingface():
+            text = (
+                f"{sm.SAM3_CHECKPOINT} from Hugging Face ({sm.HUGGINGFACE_REPO}),"
+                " fetched at the first run"
+            )
+        else:
+            text = str(weights)
+        self.weights_label.setText(text)
+        self._refresh_enabled()
+
     def choose_weights(self) -> None:
-        start = str(self.weights.parent if self.weights else Path.home())
+        start = (
+            str(self.weights.parent)
+            if self.weights is not None and not self.uses_huggingface()
+            else str(Path.home())
+        )
         name, _ = QFileDialog.getOpenFileName(
             self, "Open the SAM 3 checkpoint", start, filter="Checkpoint (*.pt)"
         )
         if not name:
             return
-        self.weights = Path(name)
-        self.weights_label.setText(str(self.weights))
+        self._set_weights(Path(name))
+
+    def use_huggingface(self) -> None:
+        """Fetch sam3.pt rather than choose it. Nothing is downloaded yet:
+        that happens at the first run, behind its progress dialog."""
+        self._set_weights(Path(sm.HUGGINGFACE))
+
+    def choose_contours_dir(self) -> None:
+        folder = QFileDialog.getExistingDirectory(
+            self, "Folder for the exported contours", str(self.export_dir())
+        )
+        if not folder:
+            return
+        self.contours_dir = Path(folder)
         self._refresh_enabled()
 
     # ----------------------------------------------------- the session's model
@@ -288,13 +376,13 @@ class Sam3Panel(QWidget):
         """The session's [segmentation_model] table, or None without a
         checkpoint. 'Animals per frame' at 'all' is written as 0, SAM 3's
         "keep everything", so tracking checks the files against that."""
-        if self.weights is None or not self.prompt.text().strip():
+        if self.weights is None or not self.prompt_text():
             return None
         spec = dict(self._loaded_spec)
         spec.update(
             backend="sam3",
             weights=str(self.weights),
-            prompt=self.prompt.text().strip(),
+            prompt=self.prompt_text(),
             score_threshold=round(self.score_threshold.value(), 4),
             max_instances=self.max_instances.value(),
             contours_dir=str(self.export_dir()),
@@ -316,8 +404,6 @@ class Sam3Panel(QWidget):
             for key, value in spec.items()
             if value is not None and value != sm.DEFAULTS.get(key)
         }
-        self.weights = Path(spec["weights"])
-        self.weights_label.setText(str(self.weights))
         self.prompt.setText(spec["prompt"])
         self.score_threshold.setValue(spec["score_threshold"])
         if spec["max_instances"] is not None:
@@ -326,7 +412,7 @@ class Sam3Panel(QWidget):
             self.max_instances.setValue(self.number_of_animals)
         if spec.get("contours_dir"):
             self.contours_dir = Path(spec["contours_dir"])
-        self._refresh_enabled()
+        self._set_weights(Path(spec["weights"]))  # refreshes everything else
 
     def choose_frames(self) -> None:
         start = str(self.frames_dir or self.output_dir or Path.cwd())
@@ -341,7 +427,7 @@ class Sam3Panel(QWidget):
 
     # ----------------------------------------------------------------- running
     def run_prelabel(self) -> None:
-        if self.frames_dir is None or self.weights is None:
+        if self.frames_dir is None or self.weights is None or not self.prompt_text():
             return
         if not self.has_gpu and QMessageBox.question(
             self,
@@ -355,8 +441,8 @@ class Sam3Panel(QWidget):
         self.prelabel_thread.set_parameters(
             frames_dir=self.frames_dir,
             weights=self.weights,
-            prompt=self.prompt.text().strip(),
-            label=self.prompt.text().strip(),
+            prompt=self.prompt_text(),
+            label=self.prompt_text(),
             device="cuda" if self.has_gpu else "cpu",
             score_threshold=self.score_threshold.value(),
             max_instances=self.max_instances.value(),
@@ -365,7 +451,7 @@ class Sam3Panel(QWidget):
         self.prelabel_thread.start()
 
     def run_export(self) -> None:
-        if self.weights is None or not self.video_paths:
+        if self.weights is None or not self.video_paths or not self.prompt_text():
             return
         # contour files are named for the clip's file name, so two clips with one
         # would write the same file and the second be skipped as already done
@@ -389,7 +475,7 @@ class Sam3Panel(QWidget):
             videos=self.video_paths,
             output_dir=output_dir,
             weights=self.weights,
-            prompt=self.prompt.text().strip(),
+            prompt=self.prompt_text(),
             device="cuda" if self.has_gpu else "cpu",
             score_threshold=self.score_threshold.value(),
             max_instances=self.max_instances.value(),
@@ -398,6 +484,57 @@ class Sam3Panel(QWidget):
             tracking_intervals=self.tracking_intervals(),
         )
         self.export_thread.start()
+
+    # ------------------------------------------------------- the command line
+    @staticmethod
+    def _exporter() -> Path:
+        """The exporter's path, run through this interpreter, as the
+        Detectron2 step does: its console script is often not on PATH."""
+        return Path(gpu_mod.__file__).with_name("inference.py")
+
+    def _update_export_command(self) -> None:
+        """What 'Export contours' would do, as a command for another machine.
+
+        Score threshold and animals per frame are always written: the
+        exporter's own defaults (0.7, and 5 per frame) are not this panel's.
+        The enhancement is written out too, because SAM 3 has no training
+        record for the exporter to adopt it from. Clips are listed one by one,
+        never as a glob, so the command exports exactly this session's set.
+        """
+        if not hasattr(self, "export_command"):
+            return  # still being built
+        prompt = self.prompt_text().replace('"', "'") or "<the animal>"
+        if self.weights is None:
+            weights = '"<sam3.pt>"'
+        elif self.uses_huggingface():
+            weights = sm.HUGGINGFACE
+        else:
+            weights = f'"{self.weights}"'
+        videos = (
+            " ".join(f'"{video}"' for video in self.video_paths)
+            or '"<the session\'s videos>"'
+        )
+        parts = [
+            f'"{sys.executable}" "{self._exporter()}"',
+            f'--backend sam3 --prompt "{prompt}"',
+            f"--weights {weights}",
+            f"--videos {videos}",
+            f'--output-dir "{self.export_dir()}"',
+            f"--score-threshold {round(self.score_threshold.value(), 4):g}",
+            f"--max-instances {self.max_instances.value()}",
+            *fp.settings_to_flags(self.settings()),
+        ]
+        self.export_command.setPlainText(" ".join(parts))
+
+    def copy_export_command(self) -> None:
+        clipboard = QApplication.clipboard()
+        if clipboard is None:
+            return
+        clipboard.setText(self.export_command.toPlainText())
+        self.copy_command_button.setText("Copied")
+        QTimer.singleShot(
+            1500, lambda: self.copy_command_button.setText("Copy command")
+        )
 
     def _prelabel_finished(self) -> None:
         summary = self.prelabel_thread.summary
@@ -498,6 +635,11 @@ class Sam3Panel(QWidget):
             (self.overwrite, "sam3_overwrite"),
             (self.export_button, "sam3_export"),
             (self.reexport, "sam3_reexport"),
+            (self.hf_button, "sam3_huggingface"),
+            (self.contours_button, "sam3_contours_dir"),
+            (self.contours_field, "sam3_contours_dir"),
+            (self.export_command, "sam3_command"),
+            (self.copy_command_button, "sam3_command"),
         ]
         for widget, key in pairs:
             if key in tips:

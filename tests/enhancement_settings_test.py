@@ -94,3 +94,44 @@ def test_split_keeps_one_piece_per_animal():
     for mask in masks:
         n_labels, _ = cv2.connectedComponents(mask, connectivity=8)
         assert n_labels == 2  # background + one component
+
+
+# ------------------------------------------- settings back into command flags
+# The SAM 3 panel hands a command to a terminal. SAM 3 has no training record
+# for the exporter to adopt the enhancement from, so the command has to carry
+# the session's settings itself, and parse back to exactly them.
+
+
+def _parsed(flags):
+    import argparse
+
+    from idtrackerai.extra_tools.detectron2_pipeline import preprocessing as fp
+
+    parser = argparse.ArgumentParser()
+    fp.add_arguments(parser)
+    settings, _ = fp.resolve_settings(parser.parse_args(flags))
+    return settings
+
+
+@pytest.mark.parametrize(
+    "settings",
+    [
+        {},
+        {"enhance": False},
+        {"enhance": True, "clahe_clip": 3.5, "gamma": 1.4, "denoise": 2},
+        {"correct_lighting": False, "shadows": -20, "illumination_sigma": 40.0},
+    ],
+)
+def test_settings_survive_the_trip_through_command_flags(settings):
+    from idtrackerai.extra_tools.detectron2_pipeline import preprocessing as fp
+
+    flags = fp.settings_to_flags(settings)
+
+    assert _parsed(flags) == fp.normalize_settings(settings)
+
+
+def test_default_settings_need_no_flags():
+    from idtrackerai.extra_tools.detectron2_pipeline import preprocessing as fp
+
+    assert fp.settings_to_flags({}) == []
+    assert fp.settings_to_flags({"enhance": False}) == ["--no-enhance"]
