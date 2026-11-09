@@ -366,6 +366,16 @@ class Sam3ExportThread(QThread):
             )
             return
 
+        # weights = "huggingface" becomes the cached sam3.pt here, before
+        # anything hashes it, so the contour files record the real checkpoint
+        if str(self.weights).lower() == "huggingface":
+            self.set_progress_label.emit("Fetching sam3.pt from Hugging Face...")
+        try:
+            self.weights = inference_mod.local_weights("sam3", self.weights)
+        except Exception as exc:  # noqa: BLE001 - Sam3WeightsError, explained
+            self.failed.emit(str(exc))
+            return
+
         try:
             predictor = Sam3Predictor(
                 checkpoint=self.weights,

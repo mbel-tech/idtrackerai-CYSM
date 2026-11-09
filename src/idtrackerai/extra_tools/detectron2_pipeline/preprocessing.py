@@ -396,6 +396,33 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
         )
 
 
+def settings_to_flags(settings: dict | None) -> list[str]:
+    """The command-line flags that reproduce ``settings`` from the built-ins.
+
+    The inverse of :func:`resolve_settings` with no profile and no fallback:
+    only what differs from the defaults is written, so a command for default
+    settings stays short. With enhancement off, nothing else matters.
+    """
+    settings = normalize_settings(settings or {})
+    assert settings is not None
+    if not settings["enhance"]:
+        return ["--no-enhance"]
+    flags: list[str] = []
+    if not settings["correct_lighting"]:
+        flags.append("--no-illumination-correction")
+    for key in (
+        "clahe_clip",
+        "clahe_tile",
+        "illumination_sigma",
+        "illumination_downsample",
+        *LIGHT_EDIT_RANGES,
+    ):
+        if settings[key] != DEFAULT_SETTINGS[key]:
+            # str, not :g, which rounds to 6 digits and would not parse back
+            flags += [f"--{key.replace('_', '-')}", str(settings[key])]
+    return flags
+
+
 def _explicit_from_args(args) -> dict:
     """Only the settings the user actually typed."""
     explicit: dict[str, Any] = {}
