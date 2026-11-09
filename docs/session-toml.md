@@ -68,6 +68,22 @@ score_threshold = 0.5
 contours_dir = '/content/drive/MyDrive/broilercamp/contours/R2_01_10_P1_SB'
 ```
 
+`prompt` is whatever word describes the animal in your videos (`'chicken'`,
+`'fish'`, `'mouse'`...); nothing is assumed. With `weights = 'huggingface'`
+there is no `sam3.pt` to copy around: each machine fetches it once from the
+gated `facebook/sam3` repository, given a token from an account granted access
+(`hf auth login`, or `HF_TOKEN`) and `pip install huggingface_hub`.
+
+```toml
+[segmentation_model]
+backend = 'sam3'
+weights = 'huggingface'
+prompt = 'chicken'
+```
+
+[sam3-toml-handoff.md](sam3-toml-handoff.md) walks through a SAM 3 session
+file key by key, for handing to whoever runs the export.
+
 Give each session its own `contours_dir`. Contour files are named after their
 video, and GoPro chapters from different cameras can share a name
 (`GX010561.MP4`), so a folder shared by several pens could mix them up. The
@@ -79,7 +95,7 @@ session avoids the question.
 | Key | Default | Meaning |
 |---|---|---|
 | `backend` | `'detectron2'` | `'detectron2'` (a Mask R-CNN) or `'sam3'` (prompted with a word). |
-| `weights` | required | Path of `model_final.pth` (or `sam3.pt`). `'model_zoo'` loads the COCO checkpoint of `config` with no fine-tuning, and then needs `classes`. |
+| `weights` | required | Path of `model_final.pth` (or `sam3.pt`). `'model_zoo'` loads the COCO checkpoint of `config` with no fine-tuning, and then needs `classes`. `'huggingface'` (SAM 3 only) fetches `sam3.pt` from Hugging Face; contour files then record `sam3.pt` and its hash as for a chosen file. |
 | `contours_dir` | none | Folder of this session's contour files, `<video stem>.h5` each. Needed unless `external_contours` lists the files. |
 | `score_threshold` | `0.7` | Detections scoring below this are dropped. |
 | `max_instances` | `number_of_animals` | Most detections kept per frame. Leave it unset so it follows the bird count; set it only to cap below or above that. With SAM 3, `0` keeps every detection it reports. |
@@ -98,7 +114,11 @@ Unknown keys are rejected with the list of valid ones, so a typo such as
 
 The enhancement the model sees is the one it was trained with, read from
 `training_metadata.json` beside the weights, exactly as for a plain
-`idtrackerai_d2_export` run.
+`idtrackerai_d2_export` run. SAM 3 was never trained here, so it has no such
+record: `--session` exports it with the built-in enhancement, **not** the
+session's own `enhancement` key. Pass the same enhancement flags on the command
+line (the SAM 3 panel's command does), or contours made in the app with other
+settings will be considered out of date and redone.
 
 ### Checked at tracking time
 
@@ -121,9 +141,11 @@ Weights you already have go into the session from the app, with no training:
   the `model_final.pth` under **Weights**, the **Contours folder** and the
   **Score threshold**. Steps 1 to 5 are only for training a new model; leave
   **Weights** empty and the export uses the one step 5 trains.
-- **Segmentation → SAM 3**: choose `sam3.pt`, the prompt, the confidence and
-  the animals per frame. Its export runs only the tracked frames and redoes a
-  clip whose contour file was made with another prompt or threshold.
+- **Segmentation → SAM 3**: choose `sam3.pt` (or **Use Hugging Face**), type
+  the prompt, and set the confidence, the animals per frame and the
+  **Contours folder**. The prompt starts empty; Export and Draft stay disabled
+  until there is one. Its export runs only the tracked frames and redoes a clip
+  whose contour file was made with another prompt or threshold.
 
 **Save parameters** writes them as the `[segmentation_model]` table, and opening
 that `.toml` again brings them back and opens on the same panel while the
@@ -132,7 +154,11 @@ contours**), the table is kept for the model the files record making them.
 Choosing **Thresholding** drops it.
 
 The export command the Detectron2 step builds carries the same weights, score
-threshold and number of animals, for running in a terminal or in Colab.
+threshold and number of animals, for running in a terminal or in Colab. The SAM 3
+panel builds one too, with the prompt, confidence, animals per frame and the
+session's enhancement, for a machine that has the GPU this one lacks. It
+exports whole clips; `idtrackerai_d2_export --session` on the saved `.toml`
+exports only the tracked frames.
 
 ## Upstream keys under a segmentation model
 

@@ -38,6 +38,21 @@ download it. It is about 3.4 GB.
 It never goes in the repository — `.gitignore` refuses `*.pt` for that reason.
 Keep it beside your data, or in the Drive project folder at `model/sam3.pt`.
 
+Or let each machine fetch it. **Use Hugging Face** in the app, `weights =
+'huggingface'` in the session `.toml`, or `--weights huggingface` on the
+command line all download `sam3.pt` once into the Hugging Face cache and use it
+from there. Access is still gated, so the machine needs a token from the
+account that was granted it, and the `huggingface_hub` package:
+
+```bash
+pip install huggingface_hub
+hf auth login          # or set HF_TOKEN
+```
+
+A refused download says so, and says this, rather than failing with an HTTP
+error. The contour files record `sam3.pt` and its hash either way, so a fetched
+checkpoint and a downloaded-by-hand one are interchangeable.
+
 > **Licence.** The weights and the `sam3` package carry Meta's own
 > **SAM License**, which is not an OSI-approved licence and has its own terms,
 > including an acceptable use policy. It is independent of this project's
@@ -119,8 +134,15 @@ set was built.
 
 ## Exporting contours
 
-In the app: **Segmentation → SAM 3 → Export contours**. When it finishes the
-session switches onto the files it wrote, if they fit the video it has loaded.
+In the app: **Segmentation → SAM 3**, type the prompt (the box starts empty,
+and Export stays disabled until it has a word in it), choose the **Contours
+folder**, then **Export contours**. When it finishes the session switches onto
+the files it wrote, if they fit the video it has loaded.
+
+Without a GPU here, **Copy command** under the export button gives the same
+export as a command to run on a machine that has one: the prompt, weights,
+confidence, animals per frame and the session's enhancement are all written
+out, so it produces the files the button would have.
 
 Like the command line, it skips clips that already have a contour file, so a
 run cancelled after three hours is picked up where it stopped rather than

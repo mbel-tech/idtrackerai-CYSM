@@ -1,0 +1,35 @@
+# A session segmented by SAM 3, prompted with a word for the animal.
+# Copy this file, fill in everything marked FILL IN, and see
+# docs/sam3-toml-handoff.md for what each key does and how to run it.
+
+name = 'my_session'                                  # FILL IN
+video_paths = ['/path/to/clip_01.mp4',               # FILL IN, in recording order
+               '/path/to/clip_02.mp4']
+number_of_animals = 6                                # FILL IN: also caps detections per frame
+track_wo_identities = true
+tracking_intervals = [[0, 18000]]                    # FILL IN, or delete to track everything
+output_dir = '/path/to/idtracker_out'                # FILL IN
+area_ths = [300.0, inf]                              # still filters the model's outlines
+# roi_list = ['+ Polygon [[100, 90], [1820, 75], [1835, 1010], [95, 1020]]']
+
+# Tables go after every plain key: anything below a [table] line belongs to it.
+[segmentation_model]
+backend = 'sam3'
+
+# The animal, as one plain word or two: 'chicken', 'fish', 'mouse', 'bird'...
+# Left empty on purpose: the exporter and tracking refuse to start until it
+# is filled in, so nothing runs with someone else's animal.
+prompt = ''                                          # FILL IN
+
+# 'huggingface' fetches sam3.pt (gated: needs `pip install huggingface_hub`
+# and `hf auth login` or HF_TOKEN, from an account granted access at
+# https://huggingface.co/facebook/sam3). Or give the path of a sam3.pt.
+weights = 'huggingface'
+
+# One folder per session: contour files are named after their clip, and
+# clips from different cameras can share a name.
+contours_dir = '/path/to/contours/my_session'        # FILL IN
+
+score_threshold = 0.5     # raise if background is detected, lower if animals are missed
+# max_instances = 0       # unset: follows number_of_animals. 0 keeps every detection.
+# on_overlap = 'merge'    # touching animals become one blob for crossing detection
