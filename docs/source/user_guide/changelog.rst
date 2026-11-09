@@ -24,10 +24,10 @@ Changelog
 
 Authors since :ref:`5.0.0`: Jordi Torrents (jordi.torrents@research.fchampalimaud.org | jordi.torrentsm@gmail.com)
 
-idtrackerai-detectron2 (this fork)
-==================================
+idtrackerai-CYSM (this fork)
+============================
 
-Changes made in `this fork <https://github.com/mbel-tech/idtrackerai-detectron2>`_
+Changes made in `this fork <https://github.com/mbel-tech/idtrackerai-CYSM>`_
 and not present in upstream idtracker.ai. They are described at length in
 ``VALIDATOR.md`` and ``README.md`` in the repository root, and in
 ``docs/detectron2-pipeline.md`` and ``docs/sam3-pipeline.md``.

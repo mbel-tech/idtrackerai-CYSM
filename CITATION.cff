@@ -1,5 +1,5 @@
 cff-version: 1.2.0
-title: idtrackerai-detectron2
+title: idtrackerai-CYSM
 message: >-
   This repository is a modified version of idtracker.ai. The tracking
   method is the work of the de Polavieja Lab. If you use this software,
@@ -11,8 +11,8 @@ type: software
 authors:
   - family-names: Bellio
     given-names: Martina
-repository-code: https://github.com/mbel-tech/idtrackerai-detectron2
-url: https://github.com/mbel-tech/idtrackerai-detectron2
+repository-code: https://github.com/mbel-tech/idtrackerai-CYSM
+url: https://github.com/mbel-tech/idtrackerai-CYSM
 abstract: >-
   A fork of idtracker.ai that accepts animal outlines from an external
   instance-segmentation model in place of its own intensity

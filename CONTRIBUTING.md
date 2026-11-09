@@ -8,7 +8,7 @@
 >
 > For problems with the Detectron2 segmentation path, the `tools/` pipeline, or
 > anything else specific to this repository, open an issue at
-> <https://github.com/mbel-tech/idtrackerai-detectron2/issues>.
+> <https://github.com/mbel-tech/idtrackerai-CYSM/issues>.
 >
 > Only report upstream if you can reproduce the problem with unmodified
 > idtracker.ai from <https://gitlab.com/polavieja_lab/idtrackerai>.

@@ -1,5 +1,5 @@
-idtrackerai-detectron2
-======================
+idtrackerai-CYSM
+================
 
 This repository is a modified version of idtracker.ai.
 
@@ -25,7 +25,7 @@ is included verbatim.
 THIS PROJECT IS NOT AFFILIATED WITH, ENDORSED BY, OR SUPPORTED BY THE
 DE POLAVIEJA LAB OR THE CHAMPALIMAUD FOUNDATION. Please do not report
 problems with this fork to the upstream project. Issues belong here:
-https://github.com/mbel-tech/idtrackerai-detectron2/issues
+https://github.com/mbel-tech/idtrackerai-CYSM/issues
 
 
 Statement of modifications (GPL-3.0 section 5a)

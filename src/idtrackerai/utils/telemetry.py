@@ -26,7 +26,7 @@ ANALYTICS_URL = "https://analytics.polaviejalab.org/report_usage.php"
 PYPI_URL = "https://pypi.org/simple/idtrackerai"
 ANALYTICS_ENVIRON = "IDTRACKERAI_DISABLE_ANALYTICS"
 ANALYTICS_ENABLE_ENVIRON = "IDTRACKERAI_ENABLE_ANALYTICS"
-FORK_URL = "https://github.com/mbel-tech/idtrackerai-detectron2"
+FORK_URL = "https://github.com/mbel-tech/idtrackerai-CYSM"
 UPDATE_HINT = (
     f"To update, get the latest version from {FORK_URL} and reinstall it "
     '(for instance "python -m pip install --upgrade ." from a fresh clone)'

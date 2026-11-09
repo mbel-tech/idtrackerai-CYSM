@@ -102,7 +102,7 @@ def test_check_version_local_versions(current, expected):
     telemetry.check_version.cache_clear()
     assert kind == expected
     if kind != ComparisonResult.EQUAL:
-        assert "mbel-tech/idtrackerai-detectron2" in message
+        assert "mbel-tech/idtrackerai-CYSM" in message
         assert "pip install --upgrade idtrackerai" not in message
 
 
