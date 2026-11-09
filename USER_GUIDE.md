@@ -104,8 +104,10 @@ Then this fork:
 pip install idtrackerai-CYSM
 ```
 
-That brings LabelMe, which you will need for annotating in section 6. It does
-**not** bring Detectron2 — that is only needed for training, it has no PyPI
+On Python 3.12 or later, that brings LabelMe, which you will need for
+annotating in section 6. LabelMe needs Python 3.12, so on 3.10 or 3.11 the
+install works but leaves it out, and you cannot annotate in that environment.
+It does **not** bring Detectron2 — that is only needed for training, it has no PyPI
 release, and it builds from source. Leave it until section 7.
 
 Check it worked:
