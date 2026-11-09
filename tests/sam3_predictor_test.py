@@ -199,3 +199,25 @@ def test_nothing_found_is_not_an_error(fake_sam3):
 
     assert out_masks == []
     assert out_scores == []
+
+
+def test_huggingface_loads_the_downloaded_checkpoint(fake_sam3, monkeypatch, tmp_path):
+    """weights = "huggingface" reaches SAM 3 as the cached file, not the word.
+
+    This is what makes drafting annotations work with the fetched checkpoint:
+    the prelabel command and the app's drafting thread both build their model
+    through Sam3Predictor.
+    """
+    import types as _types
+
+    cached = tmp_path / "cache" / "sam3.pt"
+    cached.parent.mkdir()
+    cached.write_bytes(b"fetched")
+    hub = _types.ModuleType("huggingface_hub")
+    hub.hf_hub_download = lambda repo_id, filename, **kw: str(cached)
+    monkeypatch.setitem(sys.modules, "huggingface_hub", hub)
+
+    _, built = fake_sam3
+    make("huggingface")
+
+    assert built["checkpoint_path"] == str(cached)
