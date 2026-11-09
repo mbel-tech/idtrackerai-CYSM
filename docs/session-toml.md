@@ -112,13 +112,15 @@ session avoids the question.
 Unknown keys are rejected with the list of valid ones, so a typo such as
 `score_treshold` fails at once instead of silently exporting at the default.
 
-The enhancement the model sees is the one it was trained with, read from
-`training_metadata.json` beside the weights, exactly as for a plain
+The enhancement a Detectron2 model sees is the one it was trained with, read
+from `training_metadata.json` beside the weights, exactly as for a plain
 `idtrackerai_d2_export` run. SAM 3 was never trained here, so it has no such
-record: `--session` exports it with the built-in enhancement, **not** the
-session's own `enhancement` key. Pass the same enhancement flags on the command
-line (the SAM 3 panel's command does), or contours made in the app with other
-settings will be considered out of date and redone.
+record: `--session` exports it with the session's own `enhancement` key, the
+same settings the Segmentation App's SAM 3 export uses, so contours exported
+from the app are not redone. Without the key it uses the built-in enhancement.
+Either way, enhancement flags on the command line override it. Two sessions
+that share a clip must then agree on `enhancement` as well as on
+`[segmentation_model]`, since one contour file serves both.
 
 ### Checked at tracking time
 
@@ -170,7 +172,7 @@ exports only the tracked frames.
 | `roi_list` | Still applied, per contour by its centroid: a bird whose centre is inside the perimeter is kept whole, never clipped at the edge. |
 | `intensity_ths` | Ignored. May stay as a placeholder; `[0, 255]` if unset. |
 | `use_bkg`, `background_subtraction_stat`, `number_of_frames_for_background` | Ignored: the model has already separated the animals from the background. `use_bkg = true` is harmless and logged. |
-| `enhancement` | Applied to the frames identification images are cut from, not to the contours. Irrelevant with `track_wo_identities = true`. |
+| `enhancement` | Applied to the frames identification images are cut from. Not applied to the contours at tracking time; with SAM 3, `idtrackerai_d2_export --session` already used it when it made them. For identification, irrelevant with `track_wo_identities = true`. |
 | everything else | As upstream. |
 
 ## `external_contours`

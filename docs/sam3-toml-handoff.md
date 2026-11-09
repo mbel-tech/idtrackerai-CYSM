@@ -70,10 +70,11 @@ idtrackerai_d2_export --session session.toml
 - Colab: section 8 of `colab_detectron2_pipeline.ipynb`, with the bundle from
   `idtrackerai_d2_bundle` (`sam3.pt` alongside it only if `weights` is a path).
 
-> **Enhancement.** `--session` exports SAM 3 with the built-in enhancement, not
-> the session's `enhancement` key. If the session sets one, pass the same
-> settings as flags (the SAM 3 panel's **Copy command** includes them), or
-> contours exported from the app will look out of date and be redone.
+> **Enhancement.** `--session` exports SAM 3 with the session's `enhancement`
+> key, as the app's **Export contours** does, so contours exported from the app
+> are kept rather than redone. With no key it uses the built-in enhancement.
+> Enhancement flags on the command line override the key. A clip in two
+> sessions needs the same `enhancement` in both.
 
 From the app on a machine with a CUDA GPU, **Export contours** does the same
 and switches the session onto the files when it finishes.
