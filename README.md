@@ -102,11 +102,19 @@ Install as you would upstream idtracker.ai, from this repository:
 pip install git+https://github.com/mbel-tech/idtrackerai-CYSM
 ```
 
-The installed distribution is still called `idtrackerai-detectron2` (that is
-the name `pip list` shows, and the one to use for extras, e.g.
-`idtrackerai-detectron2[annotate]`). The import name is unchanged
+The installed distribution is called `idtrackerai-CYSM` (that is the name
+`pip list` shows, and the one to use for extras, e.g.
+`idtrackerai-CYSM[annotate]`). The import name is unchanged
 (`import idtrackerai`), so it cannot be installed alongside upstream
 idtracker.ai in the same environment.
+
+If you installed it under its old name, remove that first so the two do not
+overwrite each other's files:
+
+```bash
+pip uninstall idtrackerai-detectron2
+pip install git+https://github.com/mbel-tech/idtrackerai-CYSM
+```
 
 ### Preparing a model
 

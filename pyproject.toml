@@ -7,7 +7,7 @@ build-backend = "setuptools.build_meta"
 # Renamed from "idtrackerai" so this fork is distinguishable from the
 # upstream release. The import name is unchanged, so it cannot be installed
 # alongside upstream idtracker.ai in the same environment.
-name = "idtrackerai-detectron2"
+name = "idtrackerai-CYSM"
 # Tracks the upstream version this fork is based on, with a local suffix.
 version = "6.0.15a0+detectron2.1"
 # Only the author of this fork's modifications is listed here. The

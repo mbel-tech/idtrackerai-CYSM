@@ -198,8 +198,10 @@ Documentation changes
 Packaging changes
 -----------------
 
-- Distributed as ``idtrackerai-detectron2``. The import name is unchanged, so
-  it cannot be installed alongside upstream idtracker.ai.
+- Distributed as ``idtrackerai-CYSM`` (originally ``idtrackerai-detectron2``).
+  The import name is unchanged, so it cannot be installed alongside upstream
+  idtracker.ai. An existing ``idtrackerai-detectron2`` install should be
+  uninstalled before installing under the new name.
 - Fixed the version lookup failing under the fork's distribution name, which
   made the package raise at import time once installed, and made every
   tracking run raise before it started.
