@@ -1,4 +1,6 @@
-# idtrackerai-detectron2
+# idtrackerai-CYSM
+
+*Choose Your Segmentation Model*
 
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 [![Upstream](https://img.shields.io/badge/fork%20of-idtracker.ai-lightgrey)](https://gitlab.com/polavieja_lab/idtrackerai)
@@ -8,6 +10,11 @@ A fork of [idtracker.ai](https://idtracker.ai) that takes animal outlines from
 an external instance-segmentation model — a fine-tuned Detectron2 Mask R-CNN, or
 Meta's SAM 3 prompted with a word — instead of finding them by intensity
 thresholding.
+
+The name says what it does: **CYSM — Choose Your Segmentation Model.** The
+segmentation step is the part you pick; the tracking around it stays
+idtracker.ai's. The project was previously called `idtrackerai-detectron2`,
+from when Detectron2 was the only option; old GitHub links redirect here.
 
 **Identity tracking is untouched.** Crossing detection, fragmentation, the
 identification network and gap closing are upstream idtracker.ai's, unmodified.
@@ -20,7 +27,7 @@ Only the step that turns pixels into blobs is replaced.
 > This is an **unofficial derivative**. It is not affiliated with, endorsed by,
 > or supported by the de Polavieja Lab or the Champalimaud Foundation. Please do
 > not send problems with this fork to the upstream project — open an issue
-> [here](https://github.com/mbel-tech/idtrackerai-detectron2/issues) instead.
+> [here](https://github.com/mbel-tech/idtrackerai-CYSM/issues) instead.
 >
 > For the real thing, go to
 > [gitlab.com/polavieja_lab/idtrackerai](https://gitlab.com/polavieja_lab/idtrackerai).
@@ -92,11 +99,14 @@ footage.
 Install as you would upstream idtracker.ai, from this repository:
 
 ```bash
-pip install git+https://github.com/mbel-tech/idtrackerai-detectron2
+pip install git+https://github.com/mbel-tech/idtrackerai-CYSM
 ```
 
-The import name is unchanged (`import idtrackerai`), so it cannot be installed
-alongside upstream idtracker.ai in the same environment.
+The installed distribution is still called `idtrackerai-detectron2` (that is
+the name `pip list` shows, and the one to use for extras, e.g.
+`idtrackerai-detectron2[annotate]`). The import name is unchanged
+(`import idtrackerai`), so it cannot be installed alongside upstream
+idtracker.ai in the same environment.
 
 ### Preparing a model
 

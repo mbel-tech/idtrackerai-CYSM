@@ -101,7 +101,7 @@ pip3 install torch torchvision --index-url https://download.pytorch.org/whl/...
 Then this fork:
 
 ```bash
-pip install git+https://github.com/mbel-tech/idtrackerai-detectron2.git
+pip install git+https://github.com/mbel-tech/idtrackerai-CYSM.git
 ```
 
 That brings LabelMe, which you will need for annotating in section 6. It does
@@ -500,5 +500,5 @@ from pytorch.org's index, as in section 3.
   identification algorithm actually works
 
 If something in this guide is wrong or unclear,
-[open an issue](https://github.com/mbel-tech/idtrackerai-detectron2/issues).
+[open an issue](https://github.com/mbel-tech/idtrackerai-CYSM/issues).
 Please do not send problems with this fork to the upstream project.
