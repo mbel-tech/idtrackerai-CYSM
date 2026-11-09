@@ -1,6 +1,6 @@
 # Path-based names for same-named clips
 
-Status: draft for review. Follows [mbel-tech/idtrackerai-detectron2#9](https://github.com/mbel-tech/idtrackerai-detectron2/pull/9),
+Status: draft for review. Follows [mbel-tech/idtrackerai-CYSM#9](https://github.com/mbel-tech/idtrackerai-CYSM/pull/9),
 merged, which added folder and subfolder selection and made same-named clips a
 hard error.
 

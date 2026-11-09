@@ -311,7 +311,7 @@ the Colab notebook, which `idtrackerai_d2_bundle` packages for you.
 idtrackerai_d2_bundle          # ~27 KB zip of just what Colab needs
 ```
 
-Upload to `MyDrive/idtrackerai_detectron2/`:
+Upload to `MyDrive/idtrackerai_CYSM/`:
 
 ```
 colab_bundle.zip

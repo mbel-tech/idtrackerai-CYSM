@@ -211,9 +211,8 @@ Files changed relative to the fork point:
       A section for this fork's changes, above upstream's own entries.
 
   pyproject.toml
-      Distribution renamed to idtrackerai-CYSM (originally
-      idtrackerai-detectron2) to distinguish it
-      from the upstream release. The import name idtrackerai is unchanged,
+      Distribution renamed to idtrackerai-CYSM to distinguish it from
+      the upstream release. The import name idtrackerai is unchanged,
       so the two cannot share an environment. LabelMe added as a
       dependency, since annotation is a required stage of this pipeline;
       the "annotate" extra is kept as an alias for older install commands.

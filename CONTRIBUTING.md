@@ -29,7 +29,7 @@ This project, and anyone participating in it, is governed by the [Contributor Co
 
 Bugs, feature requests and any other technical comments about the software are managed by using GitLab Issues. Before opening one:
 
-* Check if you are running the latest version of idtracker.ai (``python -m pip install -U idtrackerai``).
+* Check if you are running the latest version of idtracker.ai (``python -m pip install -U idtrackerai-CYSM``).
 * Check the [FAQs on the webpage](https://idtracker.ai/latest/user_guide/FAQs.html), the [installation troubleshooting guide](https://idtracker.ai/latest/install/installation_troubleshooting.html), and the [idtracker.ai users group](https://groups.google.com/forum/#!forum/idtrackerai_users) for a list of common questions and problems.
 * Perform a [cursory search](https://gitlab.com/polavieja_lab/idtrackerai/issues) to see if the problem has already been reported. If it has **and the issue is still open**, add a comment to the existing issue instead of opening a new one.
 
