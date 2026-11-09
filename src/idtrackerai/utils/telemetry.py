@@ -117,7 +117,7 @@ def check_version_on_console() -> None:
 def parse_release(version: str) -> tuple[int, ...]:
     """The numeric release of a version string, ignoring pre-release and local parts.
 
-    "6.0.15a0+detectron2.1" and "6.0.15+detectron2.1" both give (6, 0, 15).
+    "6.0.15a0+cysm.1" and "6.0.15+cysm.1" both give (6, 0, 15).
     """
     release = re.match(r"\s*v?(\d+(?:\.\d+)*)", version)
     if release is None:
