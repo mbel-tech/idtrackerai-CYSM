@@ -2,6 +2,7 @@
 *.log
 *.npy
 *.json
+!.zenodo.json
 *.xml
 *.tmp
 *.egg-info
