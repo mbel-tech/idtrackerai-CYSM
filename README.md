@@ -5,6 +5,7 @@
 [![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 [![Upstream](https://img.shields.io/badge/fork%20of-idtracker.ai-lightgrey)](https://gitlab.com/polavieja_lab/idtrackerai)
 [![eLife](https://img.shields.io/badge/cite-10.7554%2FeLife.107602-blue)](https://doi.org/10.7554/eLife.107602)
+[![DOI](https://img.shields.io/badge/DOI-10.5281%2Fzenodo.24103557-blue)](https://doi.org/10.5281/zenodo.24103557)
 
 A fork of [idtracker.ai](https://idtracker.ai) that takes animal outlines from
 an external instance-segmentation model — a fine-tuned Detectron2 Mask R-CNN, or
@@ -252,8 +253,8 @@ If you use idtrackerai-CYSM in work you publish, cite it as software, giving
 the version you used (`pip show idtrackerai-CYSM` prints it):
 
 > Bellio, M., & Gaia, M. (2026). *idtrackerai-CYSM: Choose Your Segmentation
-> Model* (Version 6.0.15a0.post2) [Computer software]. GitHub.
-> https://github.com/mbel-tech/idtrackerai-CYSM
+> Model* (Version 6.0.15a0.post2) [Computer software]. Zenodo.
+> https://doi.org/10.5281/zenodo.24103557
 
 ```bibtex
 @software{bellio_gaia_idtrackerai_cysm_2026,
@@ -261,6 +262,7 @@ the version you used (`pip show idtrackerai-CYSM` prints it):
   title   = {{idtrackerai-CYSM}: Choose Your Segmentation Model},
   year    = {2026},
   version = {6.0.15a0.post2},
+  doi     = {10.5281/zenodo.24103557},
   url     = {https://github.com/mbel-tech/idtrackerai-CYSM},
   license = {GPL-3.0-or-later},
   note    = {Fork of idtracker.ai}
@@ -284,8 +286,9 @@ The usual conventions for citing a repository apply:
 GitHub's *Cite this repository* button, in the sidebar, gives the same
 citation in APA and BibTeX, read from [`CITATION.cff`](CITATION.cff).
 Each GitHub release is also archived on [Zenodo](https://zenodo.org) with its
-own DOI; where a journal asks for a DOI, use the one for the version you used,
-listed on the release's Zenodo record.
+own DOI. The DOI above, [10.5281/zenodo.24103557](https://doi.org/10.5281/zenodo.24103557), always
+resolves to the latest version. To pin the exact version you used, take its
+own DOI from the *Versions* list on that page.
 
 ### idtracker.ai
 
