@@ -145,7 +145,7 @@ def test_a_refused_download_says_how_to_get_access(fake_hub):
     assert "401 Client Error" in message
 
 
-# ------------------------------------------------------- the handoff template
+# ------------------------------------------------------ the session template
 
 TEMPLATE = Path(__file__).resolve().parents[1] / "docs/sam3-session-template.toml"
 

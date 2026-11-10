@@ -1,6 +1,6 @@
 # A session segmented by SAM 3, prompted with a word for the animal.
 # Copy this file, fill in everything marked FILL IN, and see
-# docs/sam3-toml-handoff.md for what each key does and how to run it.
+# docs/sam3-toml-template.md for what each key does and how to run it.
 
 name = 'my_session'                                  # FILL IN
 video_paths = ['/path/to/clip_01.mp4',               # FILL IN, in recording order

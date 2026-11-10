@@ -81,8 +81,8 @@ weights = 'huggingface'
 prompt = 'chicken'
 ```
 
-[sam3-toml-handoff.md](sam3-toml-handoff.md) walks through a SAM 3 session
-file key by key, for handing to whoever runs the export.
+[sam3-toml-template.md](sam3-toml-template.md) walks through a SAM 3 session
+file key by key, for whoever runs the export.
 
 Give each session its own `contours_dir`. Contour files are named after their
 video, and GoPro chapters from different cameras can share a name
