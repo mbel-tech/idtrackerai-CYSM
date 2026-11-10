@@ -76,6 +76,29 @@ from .pipeline_threads import (
 )
 
 
+def labelme_missing_message(
+    python: tuple[int, ...] = tuple(sys.version_info), executable: str = sys.executable
+) -> str:
+    """What to tell someone who tries to annotate without LabelMe installed.
+
+    LabelMe is installed with this package, but only on Python 3.12 or later,
+    because LabelMe 7 requires it. On an older Python, pip cannot install it
+    at all, so suggesting a pip command there would install nothing.
+    """
+    if tuple(python[:2]) < (3, 12):
+        return (
+            "Annotating needs LabelMe, which requires Python 3.12 or later. "
+            f"This environment runs Python {python[0]}.{python[1]}, so LabelMe "
+            "cannot be installed here. Create an environment with Python 3.12 "
+            "or later and install idtrackerai-CYSM into it to annotate."
+        )
+    return (
+        "Annotating needs LabelMe, which is normally installed with "
+        "idtrackerai-CYSM. Install it into this environment with:\n\n"
+        f'  "{executable}" -m pip install "idtrackerai-CYSM[annotate]"'
+    )
+
+
 class Detectron2Panel(QWidget):
     """Walks the user from raw video to a training-ready COCO dataset."""
 
@@ -1163,11 +1186,7 @@ class Detectron2Panel(QWidget):
 
         if importlib.util.find_spec("labelme") is None:
             QMessageBox.warning(
-                self,
-                "LabelMe is not installed",
-                "Annotating needs LabelMe, which is an optional extra. Install "
-                "it into this environment with:\n\n"
-                f'  "{sys.executable}" -m pip install "idtrackerai-CYSM[annotate]"',
+                self, "LabelMe is not installed", labelme_missing_message()
             )
             return
 
