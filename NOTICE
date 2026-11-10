@@ -213,9 +213,10 @@ Files changed relative to the fork point:
   pyproject.toml
       Distribution renamed to idtrackerai-CYSM to distinguish it from
       the upstream release. The import name idtrackerai is unchanged,
-      so the two cannot share an environment. LabelMe added as the
-      optional extra "annotate" (idtrackerai-CYSM[annotate]), needed only
-      for the annotation stage of this pipeline.
+      so the two cannot share an environment. LabelMe added as a
+      dependency on Python 3.12 and later (which LabelMe requires), since
+      annotation is a required stage of this pipeline; the "annotate"
+      extra is kept as an alias for older install commands.
 
   README.md
       Replaced. The upstream README is preserved as README.idtrackerai.md.
