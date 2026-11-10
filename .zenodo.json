@@ -1,0 +1,37 @@
+{
+  "upload_type": "software",
+  "title": "idtrackerai-CYSM: Choose Your Segmentation Model",
+  "creators": [
+    {"name": "Bellio, Martina"},
+    {"name": "Gaia, Marco"}
+  ],
+  "description": "<p>A fork of idtracker.ai that accepts animal outlines from an external instance-segmentation model in place of its own intensity thresholding: a fine-tuned Detectron2 Mask R-CNN, or Meta's SAM 3 prompted with a word for the animal. SAM 3 can also draft LabelMe annotations for correction, as a way of preparing a Detectron2 dataset. Identity tracking is unchanged: crossing detection, fragmentation, identification and gap closing run exactly as in upstream idtracker.ai.</p><p>Unofficial; not affiliated with or endorsed by the de Polavieja Lab. The tracking method is theirs: please also cite Torrents, Costa &amp; de Polavieja (2026), eLife 14, RP107602, https://doi.org/10.7554/eLife.107602.</p>",
+  "keywords": [
+    "animal-tracking",
+    "instance-segmentation",
+    "detectron2",
+    "mask-rcnn",
+    "sam3",
+    "segment-anything",
+    "idtracker.ai",
+    "behavioural-analysis",
+    "fish-tracking"
+  ],
+  "related_identifiers": [
+    {
+      "identifier": "https://gitlab.com/polavieja_lab/idtrackerai",
+      "relation": "isDerivedFrom",
+      "scheme": "url"
+    },
+    {
+      "identifier": "10.7554/eLife.107602",
+      "relation": "cites",
+      "scheme": "doi"
+    },
+    {
+      "identifier": "https://pypi.org/project/idtrackerai-CYSM/",
+      "relation": "isIdenticalTo",
+      "scheme": "url"
+    }
+  ]
+}

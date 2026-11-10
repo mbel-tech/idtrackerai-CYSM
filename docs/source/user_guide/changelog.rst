@@ -203,6 +203,10 @@ Packaging changes
 - Published to PyPI, so ``pip install idtrackerai-CYSM`` installs it. A GitHub
   release triggers the upload. Fork releases are versioned
   ``<upstream base>.postN`` because PyPI rejects local version labels.
+- Citable: ``CITATION.cff`` and the README give the reference for this
+  repository (Martina Bellio and Marco Gaia), and from 6.0.15a0.post2 each
+  GitHub release is archived on Zenodo with a DOI, described by
+  ``.zenodo.json``.
 - Fixed the version lookup failing under the fork's distribution name, which
   made the package raise at import time once installed, and made every
   tracking run raise before it started.

@@ -246,6 +246,49 @@ What changed and why is in **[VALIDATOR.md](VALIDATOR.md)**.
 
 ## Citing
 
+### This repository
+
+If you use idtrackerai-CYSM in work you publish, cite it as software, giving
+the version you used (`pip show idtrackerai-CYSM` prints it):
+
+> Bellio, M., & Gaia, M. (2026). *idtrackerai-CYSM: Choose Your Segmentation
+> Model* (Version 6.0.15a0.post2) [Computer software]. GitHub.
+> https://github.com/mbel-tech/idtrackerai-CYSM
+
+```bibtex
+@software{bellio_gaia_idtrackerai_cysm_2026,
+  author  = {Bellio, Martina and Gaia, Marco},
+  title   = {{idtrackerai-CYSM}: Choose Your Segmentation Model},
+  year    = {2026},
+  version = {6.0.15a0.post2},
+  url     = {https://github.com/mbel-tech/idtrackerai-CYSM},
+  license = {GPL-3.0-or-later},
+  note    = {Fork of idtracker.ai}
+}
+```
+
+The usual conventions for citing a repository apply:
+
+- **Name the version.** Use the release you installed. Releases are listed
+  on the [Releases](https://github.com/mbel-tech/idtrackerai-CYSM/releases)
+  page and on PyPI.
+- **For an unreleased install** (`pip install git+…`), cite the short commit
+  hash and the date you accessed it in place of the version, e.g.
+  `(commit 722f0d4, accessed 10 November 2026)`. `pip show idtrackerai-CYSM`
+  reports the release the code was based on, not the commit.
+- **Mention the segmentation route** you used, Detectron2 or SAM 3, in your
+  methods. It changes how the animals were outlined.
+- **Cite the method as well as the software.** This repository is a
+  modification of idtracker.ai, so cite the papers below too.
+
+GitHub's *Cite this repository* button, in the sidebar, gives the same
+citation in APA and BibTeX, read from [`CITATION.cff`](CITATION.cff).
+Each GitHub release is also archived on [Zenodo](https://zenodo.org) with its
+own DOI; where a journal asks for a DOI, use the one for the version you used,
+listed on the release's Zenodo record.
+
+### idtracker.ai
+
 The tracking method is the de Polavieja Lab's work. **Cite their paper**,
 whether or not you use this fork:
 
@@ -266,8 +309,9 @@ Depending on what you are reporting, the earlier papers may also be relevant:
 > automatic identification of unmarked animals. *Nature Methods*, 11(7),
 > 743–748. https://doi.org/10.1038/nmeth.2994
 
-If the segmentation stage matters to your results, also cite Detectron2 and
-Mask R-CNN:
+### The segmentation models
+
+If you used the Detectron2 route, also cite Detectron2 and Mask R-CNN:
 
 > Wu, Y., Kirillov, A., Massa, F., Lo, W.-Y., & Girshick, R. (2019).
 > Detectron2. https://github.com/facebookresearch/detectron2
@@ -282,8 +326,7 @@ too:
 > Meta AI Research (2025). SAM 3: Segment Anything with Concepts.
 > https://github.com/facebookresearch/sam3
 
-[`CITATION.cff`](CITATION.cff) carries all of this in machine-readable form;
-GitHub's *Cite this repository* button reads it.
+[`CITATION.cff`](CITATION.cff) carries all of this in machine-readable form.
 
 ## Licence
 
