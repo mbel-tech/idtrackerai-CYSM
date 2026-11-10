@@ -46,9 +46,9 @@ Zenodo archives every GitHub release and mints a DOI for it, using
 `.zenodo.json` for the metadata. Keep the authors and title there, in
 `CITATION.cff`, in `pyproject.toml` and in the README's citation in step.
 On each release, update `version` and `date-released` in `CITATION.cff` and
-the version in the README's APA and BibTeX entries. Once the first DOI
-exists, add the Zenodo concept DOI (the one that covers all versions) as
-`doi:` in `CITATION.cff` and to the README's citation.
+the version in the README's APA and BibTeX entries. The Zenodo concept DOI,
+`10.5281/zenodo.24103557`, covers all versions and stays the same across releases.
+Don't replace it with a single version's DOI.
 
 PyPI never accepts the same version twice. A failed or repeated upload needs
 a new version number, so don't re-tag. Only use `gh workflow run publish.yml`
