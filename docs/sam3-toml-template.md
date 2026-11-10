@@ -1,4 +1,4 @@
-# Handoff: a SAM 3 session `.toml`
+# A SAM 3 session `.toml`
 
 For whoever runs a session segmented by SAM 3: what goes in the file, where
 each stage runs, and what to check. The full key reference is in
