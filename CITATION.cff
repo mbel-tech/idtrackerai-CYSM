@@ -35,8 +35,8 @@ keywords:
   - behavioural-analysis
   - fish-tracking
 license: GPL-3.0-or-later
-version: 6.0.15a0.post1
-date-released: '2026-11-09'
+version: 6.0.15a0.post2
+date-released: '2026-11-10'
 
 preferred-citation:
   type: article

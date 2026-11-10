@@ -252,7 +252,7 @@ If you use idtrackerai-CYSM in work you publish, cite it as software, giving
 the version you used (`pip show idtrackerai-CYSM` prints it):
 
 > Bellio, M., & Gaia, M. (2026). *idtrackerai-CYSM: Choose Your Segmentation
-> Model* (Version 6.0.15a0.post1) [Computer software]. GitHub.
+> Model* (Version 6.0.15a0.post2) [Computer software]. GitHub.
 > https://github.com/mbel-tech/idtrackerai-CYSM
 
 ```bibtex
@@ -260,7 +260,7 @@ the version you used (`pip show idtrackerai-CYSM` prints it):
   author  = {Bellio, Martina and Gaia, Marco},
   title   = {{idtrackerai-CYSM}: Choose Your Segmentation Model},
   year    = {2026},
-  version = {6.0.15a0.post1},
+  version = {6.0.15a0.post2},
   url     = {https://github.com/mbel-tech/idtrackerai-CYSM},
   license = {GPL-3.0-or-later},
   note    = {Fork of idtracker.ai}
@@ -283,6 +283,9 @@ The usual conventions for citing a repository apply:
 
 GitHub's *Cite this repository* button, in the sidebar, gives the same
 citation in APA and BibTeX, read from [`CITATION.cff`](CITATION.cff).
+Each GitHub release is also archived on [Zenodo](https://zenodo.org) with its
+own DOI; where a journal asks for a DOI, use the one for the version you used,
+listed on the release's Zenodo record.
 
 ### idtracker.ai
 

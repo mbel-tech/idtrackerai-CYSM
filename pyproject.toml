@@ -11,13 +11,14 @@ name = "idtrackerai-CYSM"
 # Tracks the upstream version this fork is based on. PyPI rejects local
 # version labels ("+cysm.1"), so fork releases are numbered with a .postN
 # suffix instead: bump N for each release made from the same upstream base.
-version = "6.0.15a0.post1"
-# Only the author of this fork's modifications is listed here. The
+version = "6.0.15a0.post2"
+# Only the authors of this fork's modifications are listed here. The
 # idtracker.ai authors are credited in NOTICE, README.md and CITATION.cff;
 # naming them in package metadata would suggest they maintain this fork or
 # accept contact about it, which they do not.
 authors = [
     { name = "Martina Bellio" },
+    { name = "Marco Gaia" },
 ]
 description = "A fork of idtracker.ai that accepts animal outlines from an external instance-segmentation model -- a fine-tuned Detectron2 Mask R-CNN, or SAM 3 prompted with a word -- in place of intensity thresholding. Not affiliated with or endorsed by the de Polavieja Lab."
 readme = "README.md"
