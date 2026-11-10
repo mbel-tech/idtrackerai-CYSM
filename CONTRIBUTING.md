@@ -57,4 +57,35 @@ All tests must succeed, you can run them with [PyTest](https://docs.pytest.org/)
 
 Relevant code modifications should always include a record in [the changelog](docs/source/user_guide/changelog.rst).
 
+## Releasing (this fork)
+
+Pushing to `master` publishes nothing. A GitHub release publishes the package
+to PyPI as `idtrackerai-CYSM`, and Zenodo archives the release with a DOI.
+
+1. Bump `version` in `pyproject.toml`. The scheme is `<upstream base>.postN`:
+   increment N (`6.0.15a0.post2` → `6.0.15a0.post3`). Don't use a local label
+   like `+cysm.1`, because PyPI rejects it. In the same change, update
+   `version` and `date-released` in `CITATION.cff`, the version in the
+   README's APA and BibTeX entries, and add a line to the changelog.
+2. Merge, then create the release with the tag `v` + that exact version:
+
+   ```bash
+   gh release create v6.0.15a0.post3 --repo mbel-tech/idtrackerai-CYSM --target master --prerelease --title "v6.0.15a0.post3" --notes "..."
+   ```
+
+   Keep `--prerelease` while the version contains `a`, `b` or `rc`.
+3. The `publish` workflow (`.github/workflows/publish.yml`) builds the
+   package, checks that the tag matches `pyproject.toml`, and uploads it through
+   PyPI trusted publishing. Follow it with
+   `gh run watch --repo mbel-tech/idtrackerai-CYSM`.
+
+PyPI never accepts the same version twice: a failed or repeated upload needs a
+new version number. Use `gh workflow run publish.yml` only to retry an upload
+that never happened.
+
+Keep the authors and title in step across `.zenodo.json`, `CITATION.cff`,
+`pyproject.toml` and the README's citation. The Zenodo concept DOI,
+`10.5281/zenodo.24103557`, covers every version and stays the same across
+releases.
+
 Happy coding!
