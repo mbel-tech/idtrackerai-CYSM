@@ -1,16 +1,17 @@
 cff-version: 1.2.0
-title: idtrackerai-CYSM
+title: "idtrackerai-CYSM: Choose Your Segmentation Model"
 message: >-
-  This repository is a modified version of idtracker.ai. The tracking
-  method is the work of the de Polavieja Lab. If you use this software,
-  please cite their paper (given under preferred-citation) first. Cite
-  this repository in addition only if the external segmentation path --
-  Detectron2 or SAM 3 -- is itself relevant to what you are reporting,
-  and cite Detectron2, Mask R-CNN or SAM 3 as well when you used them.
+  If you use this software, please cite it as below, giving the version
+  you used. This repository is a modified version of idtracker.ai and the
+  tracking method is the work of the de Polavieja Lab, so also cite their
+  paper (given under preferred-citation), and cite Detectron2, Mask R-CNN
+  or SAM 3 when you used them.
 type: software
 authors:
   - family-names: Bellio
     given-names: Martina
+  - family-names: Gaia
+    given-names: Marco
 repository-code: https://github.com/mbel-tech/idtrackerai-CYSM
 url: https://github.com/mbel-tech/idtrackerai-CYSM
 abstract: >-
@@ -34,7 +35,8 @@ keywords:
   - behavioural-analysis
   - fish-tracking
 license: GPL-3.0-or-later
-date-released: '2026-09-20'
+version: 6.0.15a0.post1
+date-released: '2026-11-09'
 
 preferred-citation:
   type: article
@@ -159,3 +161,10 @@ references:
       Vision (ICCV)
     year: 2017
     doi: 10.1109/ICCV.2017.322
+
+  - type: software
+    title: "SAM 3: Segment Anything with Concepts"
+    authors:
+      - name: Meta AI Research
+    repository-code: https://github.com/facebookresearch/sam3
+    year: 2025
