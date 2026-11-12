@@ -89,7 +89,15 @@ PyTorch has no ROCm build for Windows, so an AMD card is not an alternative.
 Without CUDA, the Segmentation App offers drafting (behind a confirmation that
 says what it will cost) and withholds exporting, pointing at Colab instead.
 
-Section 8 of `colab_detectron2_pipeline.ipynb` runs both stages there. It is the
+To export and track a session there, use the SAM 3 panel's **Save Colab
+notebook...** button, or `idtrackerai_colab_notebook --session <files>.toml
+--output run_colab.ipynb`: the notebook holds the session's settings and needs
+only the Drive folder with the videos (and `sam3.pt`, unless the weights come
+from Hugging Face, in which case it reads the `HF_TOKEN` Colab secret). See
+[the YOLO page](yolo-pipeline.md#in-colab-from-one-notebook) for the steps,
+which are the same.
+
+To draft annotations there, section 8 of `colab_detectron2_pipeline.ipynb` runs both stages. It is the
 same bundle the Detectron2 stages use: build it with `idtrackerai_d2_bundle`,
 upload it alongside `sam3.pt`, and run the cells.
 

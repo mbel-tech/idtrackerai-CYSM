@@ -55,10 +55,11 @@ from idtrackerai.extra_tools.detectron2_pipeline import sampling as sampling_mod
 from idtrackerai.extra_tools.detectron2_pipeline import segmentation_model as sm
 from idtrackerai.GUI_tools import WrappedLabel
 
+from .colab_notebook_export import ColabNotebookExport
 from .pipeline_threads import GpuCheckThread, Sam3ExportThread, Sam3PrelabelThread
 
 
-class Sam3Panel(QWidget):
+class Sam3Panel(ColabNotebookExport, QWidget):
     """Everything SAM 3 needs, and nothing the other modes already provide."""
 
     contoursReady = Signal(object)  # list[Path] written by an export
@@ -237,13 +238,19 @@ class Sam3Panel(QWidget):
         self.copy_command_button.clicked.connect(self.copy_export_command)
         layout.addWidget(self.copy_command_button)
 
+        notebook_label = WrappedLabel()
+        notebook_label.setText(
+            "Or run it on Colab: one notebook with this session's settings "
+            "in it, which only needs the Drive folder of the videos and weights."
+        )
+        layout.addWidget(notebook_label)
+        layout.addWidget(self.make_notebook_button())
+
         self.colab_hint = WrappedLabel()
         self.colab_hint.setText(
             "Without a GPU here, run the command above on a machine that has "
-            "one, or run this stage in Colab: build the bundle with "
-            "idtrackerai_d2_bundle, upload it (with sam3.pt, unless the weights "
-            "come from Hugging Face), and use section 8 of the notebook. Then "
-            "come back and load the contour files through External contours."
+            "one, or use Save Colab notebook: it writes this session as a "
+            "notebook that segments and tracks on a Colab GPU."
         )
         layout.addWidget(self.colab_hint)
         return box
@@ -640,6 +647,7 @@ class Sam3Panel(QWidget):
             (self.contours_field, "sam3_contours_dir"),
             (self.export_command, "sam3_command"),
             (self.copy_command_button, "sam3_command"),
+            (self.notebook_button, "sam3_notebook"),
         ]
         for widget, key in pairs:
             if key in tips:

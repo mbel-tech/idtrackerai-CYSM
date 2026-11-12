@@ -159,6 +159,10 @@ class SegmentationGUI(GUIBase):
         self.n_animals.valueChanged.connect(self.detectron2_panel.set_number_of_animals)
         self.n_animals.valueChanged.connect(self.sam3_panel.set_number_of_animals)
         self.sam3_panel.tracking_intervals = lambda: self.tracking_interval.value()
+        # each model panel can write the session as a Colab notebook
+        self.detectron2_panel.session_parameters = self.notebook_parameters
+        self.sam3_panel.session_parameters = self.notebook_parameters
+        self.yolo_panel.session_parameters = self.notebook_parameters
         self.n_animals.valueChanged.connect(self.yolo_panel.set_number_of_animals)
         self.yolo_panel.tracking_intervals = lambda: self.tracking_interval.value()
         self.n_animals.valueChanged.connect(self.blobInfo.setNAnimals)
@@ -593,6 +597,17 @@ class SegmentationGUI(GUIBase):
         ):
             out["exclusive_rois"] = self.ROI_Widget.exclusive_rois.isChecked()
         return out
+
+    def notebook_parameters(self) -> dict | None:
+        """The session as it would be saved, always with a name, and with
+        the folder a notebook is best saved in. None before a video is open."""
+        if not hasattr(self.open_widget, "single_file"):  # set by the first video
+            return None
+        return (
+            {"name": self.getSessionName()}
+            | self.out_parameters()
+            | {"output_dir": str(self.session.output_dir or "")}
+        )
 
     def model_panel_for(self, mode: str, external_contours):
         """The panel whose model the session's contours come from, or None.

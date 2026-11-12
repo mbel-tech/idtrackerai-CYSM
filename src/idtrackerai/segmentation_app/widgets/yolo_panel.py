@@ -53,10 +53,11 @@ from idtrackerai.extra_tools.detectron2_pipeline import segmentation_model as sm
 from idtrackerai.extra_tools.detectron2_pipeline import yolo_import
 from idtrackerai.GUI_tools import WrappedLabel
 
+from .colab_notebook_export import ColabNotebookExport
 from .pipeline_threads import GpuCheckThread, YoloExportThread
 
 
-class YoloPanel(QWidget):
+class YoloPanel(ColabNotebookExport, QWidget):
     """Everything the YOLO route needs, and nothing the other modes provide."""
 
     contoursReady = Signal(object)  # list[Path] written by an export or import
@@ -191,14 +192,20 @@ class YoloPanel(QWidget):
         self.copy_command_button.clicked.connect(self.copy_export_command)
         layout.addWidget(self.copy_command_button)
 
+        notebook_label = WrappedLabel()
+        notebook_label.setText(
+            "Or run it on Colab: one notebook with this session's settings "
+            "in it, which only needs the Drive folder of the videos and weights."
+        )
+        layout.addWidget(notebook_label)
+        layout.addWidget(self.make_notebook_button())
+
         self.colab_hint = WrappedLabel()
         self.colab_hint.setText(
             "Without a GPU here the export runs at a few frames per second. "
             "For whole videos, run the command above on a machine that has "
-            "one, or in Colab: save this session's .toml, build the bundle "
-            "with idtrackerai_d2_bundle, upload both with best.pt, and run "
-            "the exporter with --session. Then come back and load the contour "
-            "files through External contours."
+            "one, or use Save Colab notebook: it writes this session as a "
+            "notebook that segments and tracks on a Colab GPU."
         )
         layout.addWidget(self.colab_hint)
         return box
@@ -591,6 +598,7 @@ class YoloPanel(QWidget):
             (self.contours_field, "yolo_contours_dir"),
             (self.export_command, "yolo_command"),
             (self.copy_command_button, "yolo_command"),
+            (self.notebook_button, "yolo_notebook"),
             (self.import_button, "yolo_import"),
         ]
         for widget, key in pairs:
