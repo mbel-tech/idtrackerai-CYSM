@@ -151,19 +151,52 @@ def test_the_first_cell_says_what_to_put_on_drive(saved, backend):
     assert "GPU" in intro and "Run all" in intro
 
 
-def test_only_the_models_own_package_is_installed(saved, backend):
-    install = code(json.loads(saved.read_text(encoding="utf-8")), "install")
-    wanted = {
-        "yolo": "ultralytics",
-        "sam3": "sam3",
-        "sam3-huggingface": "sam3",
-        "detectron2": "detectron2",
-    }[backend]
-    assert f"'{wanted}'" in install or f"{wanted}.git" in install
-    for other in {"ultralytics", "'sam3'", "detectron2"} - {wanted, f"'{wanted}'"}:
-        assert other not in install
-    assert "idtrackerai-CYSM" in install
-    assert ("HF_TOKEN" in install) == (backend == "sam3-huggingface")
+def pip_commands(notebook, monkeypatch, backends, huggingface=False, folder=None):
+    """What the install cell would pip, for the models the sessions need."""
+    import subprocess
+    from types import SimpleNamespace
+
+    commands = []
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda cmd, **kwargs: commands.append(" ".join(cmd[2:])) or SimpleNamespace(returncode=0),
+    )
+    monkeypatch.setenv("HF_TOKEN", "from-the-test")
+    namespace = {"BACKENDS": backends, "NEEDS_HUGGINGFACE": huggingface,
+                 "FOLDER": folder or Path("unused")}  # fmt: skip
+    exec(code(notebook, "install"), namespace)  # noqa: S102 - our own notebook cell
+    return commands
+
+
+@pytest.mark.parametrize(
+    "backend, wanted", [("yolo", "ultralytics"), ("sam3", "sam3"), ("detectron2", "detectron2")]
+)
+def test_only_the_models_own_package_is_installed(tmp_path, monkeypatch, backend, wanted):
+    """Which models run is only known once the folder is read, so the cell
+    decides when it runs; this runs it with pip stood in for."""
+    notebook = cn.build_notebook([session("yolo")])
+    commands = pip_commands(notebook, monkeypatch, [backend], folder=tmp_path)
+    packages = " ".join(commands)
+    for package in ("ultralytics", " sam3", "detectron2"):
+        assert (package in packages) == (package.strip() == wanted), commands
+    assert "idtrackerai-CYSM" in commands[-1]
+
+
+def test_the_install_source_can_be_a_branch(monkeypatch):
+    notebook = cn.build_notebook([session("yolo")], install_from="git+https://x/y.git@b")
+    assert pip_commands(notebook, monkeypatch, ["yolo"])[-1].endswith("git+https://x/y.git@b")
+
+
+def test_hugging_face_weights_need_the_token(monkeypatch):
+    notebook = cn.build_notebook([session("sam3-huggingface")])
+    assert pip_commands(notebook, monkeypatch, ["sam3"], huggingface=True)
+    with pytest.raises(SystemExit, match="HF_TOKEN"):
+        monkeypatch.delenv("HF_TOKEN")
+        exec(  # noqa: S102 - our own notebook cell
+            code(notebook, "install"),
+            {"BACKENDS": ["sam3"], "NEEDS_HUGGINGFACE": True, "FOLDER": Path("unused")},
+        )
 
 
 def test_the_checklist_names_the_files_to_upload(backend):
@@ -344,6 +377,196 @@ def test_a_failed_tracking_run_is_not_copied(tmp_path):
     assert not (drive.folder / "tracked" / "session_R2_01_10_P5").exists()
 
 
+# ------------------------------------------- companion .toml files on Drive
+
+
+def companion(folder: Path, relative: str, **params) -> Path:
+    path = folder / relative
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lines = []
+    for key, value in params.items():
+        if isinstance(value, dict):
+            inner = ", ".join(f"{k} = {json.dumps(v)}" for k, v in value.items())
+            lines.append(f"{key} = {{{inner}}}")
+        else:
+            lines.append(f"{key} = {json.dumps(value)}")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return path
+
+
+def written(drive, name: str) -> dict:
+    return toml.loads((drive.folder / "sessions" / f"{name}.toml").read_text("utf-8"))
+
+
+def test_a_toml_named_after_the_video_is_used_for_it(tmp_path, capsys):
+    """The file beside the video says how that video is run, whatever the
+    notebook was written with."""
+    drive = Drive(tmp_path, [session("yolo")])
+    drive.put("best.pt")
+    drive.put("other.pt")
+    video = drive.put("videos/R2_01_10_P5_SB_fps24.mp4")
+    companion(
+        drive.folder, "toml/R2_01_10_P5_SB_fps24.toml",
+        number_of_animals=7,
+        roi_list=["+ Polygon [[1, 1], [9, 1], [9, 9]]"],
+        segmentation_model={"backend": "yolo", "weights": "C:/models/other.pt", "imgsz": 640},
+    )  # fmt: skip
+    drive.run("sessions")
+
+    params = written(drive, "R2_01_10_P5_SB_fps24")
+    assert params["number_of_animals"] == 7
+    assert params["roi_list"] == ["+ Polygon [[1, 1], [9, 1], [9, 9]]"]
+    assert params["video_paths"] == [str(video)]
+    model = params["segmentation_model"]
+    assert model["weights"] == str(drive.folder / "other.pt") and model["imgsz"] == 640
+    assert model["contours_dir"] == str(drive.folder / "contours" / "R2_01_10_P5_SB_fps24")
+    # the notebook's own session for that video stands back
+    assert not (drive.folder / "sessions" / "R2_01_10_P5.toml").exists()
+    assert "R2_01_10_P5_SB_fps24.toml" in capsys.readouterr().out
+
+
+def test_a_toml_that_lists_the_video_is_its_companion(tmp_path):
+    """Session files written on Windows name their videos by a Windows path."""
+    drive = Drive(tmp_path, [])
+    drive.put("best.pt")
+    drive.put("clip_a.mp4")
+    drive.put("clip_b.mp4")
+    companion(
+        drive.folder, "pen5.toml",
+        name="pen5",
+        video_paths=["D:\\rec\\clip_a.mp4", "D:\\rec\\clip_b.mp4"],
+        number_of_animals=9,
+        output_dir="D:\\out",
+        segmentation_model={"backend": "yolo", "weights": "best.pt",
+                            "contours_dir": "D:\\contours"},
+    )  # fmt: skip
+    drive.run("sessions")
+    params = written(drive, "pen5")
+    assert params["video_paths"] == [
+        str(drive.folder / "clip_a.mp4"), str(drive.folder / "clip_b.mp4")
+    ]  # fmt: skip
+    assert "output_dir" not in params
+    assert params["segmentation_model"]["contours_dir"] == str(
+        drive.folder / "contours" / "pen5"
+    )
+
+
+def test_a_toml_for_a_video_that_is_not_there_is_left_out(tmp_path, capsys):
+    drive = Drive(tmp_path, [])
+    drive.put("best.pt")
+    drive.put("here.mp4")
+    model = {"backend": "yolo", "weights": "best.pt"}
+    companion(drive.folder, "here.toml", number_of_animals=9, segmentation_model=model)
+    companion(drive.folder, "absent.toml", video_paths=["absent.mp4"],
+              number_of_animals=9, segmentation_model=model)  # fmt: skip
+    drive.run("sessions")
+    names = sorted(p.name for p in (drive.folder / "sessions").glob("*.toml"))
+    assert names == ["here.toml"]
+    assert "absent.toml" in capsys.readouterr().out
+
+
+def test_a_video_without_a_toml_stops_at_the_settings(tmp_path):
+    """Nothing says how to run it, so the notebook asks instead of guessing."""
+    drive = Drive(tmp_path, [])
+    drive.put("best.pt")
+    drive.put("lonely.mp4")
+    with pytest.raises(SystemExit, match="settings cell") as stop:
+        drive.run("sessions")
+    assert "lonely.mp4" in str(stop.value)
+    assert "USE_FOR_VIDEOS_WITHOUT_A_TOML" in str(stop.value)
+
+
+def test_the_settings_cell_runs_the_videos_without_a_toml_once_confirmed(tmp_path):
+    drive = Drive(tmp_path, [])
+    drive.put("best.pt")
+    video = drive.put("lonely.mp4")
+    drive.namespace.update(
+        BACKEND="yolo", WEIGHTS="best.pt", NUMBER_OF_ANIMALS=4, IMAGE_SIZE=1280,
+        ROI_LIST=["+ Polygon [[1, 1], [9, 1], [9, 9]]"],
+        USE_FOR_VIDEOS_WITHOUT_A_TOML=True,
+    )  # fmt: skip
+    drive.run("sessions")
+    params = written(drive, "lonely")
+    assert params["video_paths"] == [str(video)] and params["number_of_animals"] == 4
+    assert params["roi_list"] == ["+ Polygon [[1, 1], [9, 1], [9, 9]]"]
+    spec = sm.normalize_model(params["segmentation_model"])
+    assert (spec["backend"], spec["imgsz"]) == ("yolo", 1280)
+    assert spec["weights"] == str(drive.folder / "best.pt")
+
+
+def test_confirmed_settings_still_need_what_tracking_needs(tmp_path):
+    drive = Drive(tmp_path, [])
+    drive.put("lonely.mp4")
+    drive.namespace.update(USE_FOR_VIDEOS_WITHOUT_A_TOML=True)
+    with pytest.raises(SystemExit) as stop:
+        drive.run("sessions")
+    assert "WEIGHTS" in str(stop.value) and "NUMBER_OF_ANIMALS" in str(stop.value)
+
+
+def test_the_settings_are_prefilled_from_the_session_the_notebook_was_saved_from(tmp_path):
+    drive = Drive(tmp_path, [session("yolo")])
+    ns = drive.namespace
+    assert (ns["BACKEND"], ns["WEIGHTS"], ns["IMAGE_SIZE"]) == ("yolo", "best.pt", 1280)
+    assert ns["NUMBER_OF_ANIMALS"] == 9 and ns["ROI_LIST"] == ROI
+    assert ns["USE_FOR_VIDEOS_WITHOUT_A_TOML"] is False
+
+
+def test_another_video_in_the_folder_is_not_run_with_this_sessions_settings(
+    tmp_path, capsys
+):
+    """One pen's region of interest must not be applied to another pen's
+    video just because both are in the folder."""
+    drive = Drive(tmp_path, [session("yolo")])
+    drive.put("best.pt")
+    drive.put("R2_01_10_P5_SB_fps24.mp4")
+    drive.put("R3_08_10_P26_SB_fps24.mp4")
+    drive.run("sessions")
+    names = sorted(p.name for p in (drive.folder / "sessions").glob("*.toml"))
+    assert names == ["R2_01_10_P5.toml"]
+    said = capsys.readouterr().out
+    assert "R3_08_10_P26_SB_fps24.mp4" in said and "settings cell" in said
+
+
+def test_one_model_can_replace_the_one_in_every_toml(tmp_path):
+    """Session files written for SAM 3, run with the YOLO of the settings."""
+    drive = Drive(tmp_path, [])
+    drive.put("best.pt")
+    drive.put("pen5.mp4")
+    companion(
+        drive.folder, "pen5.toml", number_of_animals=9,
+        segmentation_model={"backend": "sam3", "weights": "huggingface", "prompt": "bird"},
+    )  # fmt: skip
+    drive.namespace.update(
+        BACKEND="yolo", WEIGHTS="best.pt", USE_THIS_MODEL_FOR_EVERY_VIDEO=True
+    )
+    drive.run("sessions")
+    model = written(drive, "pen5")["segmentation_model"]
+    assert model["backend"] == "yolo" and "prompt" not in model
+    assert drive.namespace["BACKENDS"] == ["yolo"]
+    assert drive.namespace["NEEDS_HUGGINGFACE"] is False
+
+
+def test_two_tomls_for_one_video_are_refused(tmp_path):
+    drive = Drive(tmp_path, [])
+    drive.put("best.pt")
+    drive.put("pen5.mp4")
+    model = {"backend": "yolo", "weights": "best.pt"}
+    companion(drive.folder, "pen5.toml", number_of_animals=9, segmentation_model=model)
+    companion(drive.folder, "again.toml", video_paths=["pen5.mp4"],
+              number_of_animals=9, segmentation_model=model)  # fmt: skip
+    with pytest.raises(SystemExit, match="pen5.mp4"):
+        drive.run("sessions")
+
+
+def test_a_notebook_can_be_written_without_any_session():
+    notebook = cn.build_notebook([])
+    intro = "".join(notebook["cells"][0]["source"])
+    assert ".toml" in intro and "settings cell" in intro
+    for cell in notebook["cells"]:
+        if cell["cell_type"] == "code":
+            compile("".join(cell["source"]), cell["id"], "exec")
+
+
 # ------------------------------------------------------------- what is refused
 
 
@@ -392,3 +615,11 @@ def test_the_command_line_writes_a_notebook_from_toml_files(tmp_path, monkeypatc
     assert "R2_01_10_P5" in settings and "R3_08_10_P26" in settings
     printed = capsys.readouterr().out
     assert "best.pt" in printed and "R3_08_10_P26_SB_fps24.mp4" in printed
+
+
+def test_the_command_line_needs_no_session(tmp_path, monkeypatch, capsys):
+    output = tmp_path / "generic.ipynb"
+    monkeypatch.setattr(sys, "argv", ["idtrackerai_colab_notebook", "--output", str(output)])
+    cn.main()
+    assert json.loads(output.read_text(encoding="utf-8"))["nbformat"] == 4
+    assert ".toml" in capsys.readouterr().out

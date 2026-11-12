@@ -168,7 +168,7 @@ A session that already has its model (Detectron2, SAM 3 or YOLO) can be handed
 to Colab as a single notebook: **Save Colab notebook...** in each model's
 panel, or `idtrackerai_colab_notebook --session <files>.toml --output
 run_colab.ipynb`. It needs only the Drive folder holding the videos and the
-weights; see [docs/yolo-pipeline.md](docs/yolo-pipeline.md#in-colab-from-one-notebook).
+weights, and uses a video's own `.toml` when the folder has one; see [docs/yolo-pipeline.md](docs/yolo-pipeline.md#in-colab-from-one-notebook).
 
 Every stage is also available as an installed command — `idtrackerai_d2_sample`,
 `idtrackerai_d2_dataset`, `idtrackerai_d2_train` and so on — for scripting or a

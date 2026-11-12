@@ -83,7 +83,10 @@ read, so changing them does not need a new export.
 
 **Enhancement.** A YOLO model was trained on the frames as recorded, so that is
 what it is given. Only an `enhancement` table in the session, or an
-enhancement flag on the command line, changes that.
+enhancement flag on the command line, changes that. In the Segmentation App the
+Frame enhancement control is therefore left out of the YOLO and SAM 3 modes
+(and of External contours), unless the session already has enhancement switched
+on; it stays with Thresholding and Detectron2.
 
 ## Run it
 
@@ -136,6 +139,30 @@ region of interest, the number of animals, the tracking settings. Then:
 2. Open the notebook in Colab and set that folder in the first cell. It is the
    only thing to edit.
 3. Choose a GPU runtime and Run all.
+
+**Which settings each video gets.** The notebook reads the folder and decides
+per video:
+
+1. A companion `.toml` in the folder comes first: a file named after the video
+   (`pen5.mp4`, `pen5.toml`), or any session `.toml` that lists the video in
+   `video_paths`. It can sit in another subfolder, and it can have been written
+   on Windows: only file names are used, `output_dir` and `contours_dir` are
+   replaced.
+2. Otherwise, a video the notebook was written for is run with the session
+   saved in the notebook.
+3. Any other video waits. The notebook's settings cell (model, weights, number
+   of animals, region of interest, as Colab form fields) is for those, and is
+   used only after you tick `USE_FOR_VIDEOS_WITHOUT_A_TOML`, so one pen's
+   region of interest is never applied to another pen's video by accident. If
+   no video has settings at all, the notebook stops there and says what to
+   fill in.
+
+`USE_THIS_MODEL_FOR_EVERY_VIDEO` in the same cell replaces the model named in
+every `.toml` with the one in the settings cell. That is how session files
+written for SAM 3 are run with a YOLO model without editing them.
+
+`idtrackerai_colab_notebook --output run_colab.ipynb` with no `--session`
+writes a notebook that works purely from the folder.
 
 It installs this fork and `ultralytics`, exports the contours, tracks each
 session on the Colab disk, copies each finished one to `tracked/` in the Drive

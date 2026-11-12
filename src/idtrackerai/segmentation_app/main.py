@@ -413,8 +413,23 @@ class SegmentationGUI(GUIBase):
         for widget in (self.area_thresholds, self.blobInfo):
             widget.setVisible(not with_a_model)
 
+        self.update_enhancement_visibility()
         self.update_enhancement_hint()
         self.videoPlayer.update()
+
+    def update_enhancement_visibility(self) -> None:
+        """Offers the frame enhancement only where it does something.
+
+        Thresholding finds animals by contrast, which is what enhancement
+        changes, and a Detectron2 model is trained on enhanced frames (step 1
+        of its panel). SAM 3 and YOLO were trained on frames as recorded, and
+        contour files are already made, so there the panel is left out. It is
+        still shown when enhancement is switched on, because then it is being
+        applied and must stay in view.
+        """
+        mode = self.segmentation_source.mode()
+        enhancing = bool(self.enhancement.settings().get("enhance", False))
+        self.enhancement.setVisible(mode in (THRESHOLDING, DETECTRON2) or enhancing)
 
     def manageDropedPaths(self, paths: Sequence[str]) -> None:
         self.open_widget.process_paths(paths)
@@ -437,6 +452,7 @@ class SegmentationGUI(GUIBase):
             self.segmentation_source.source.setCurrentText(
                 {"sam3": SAM3, "yolo": YOLO}.get(backend, DETECTRON2)
             )
+        self.update_enhancement_visibility()
         self.intensity_thresholds.setValue(self.session.intensity_ths)
         self.area_thresholds.setValue(self.session.area_ths)
         self.n_animals.setValue(self.session.number_of_animals)
