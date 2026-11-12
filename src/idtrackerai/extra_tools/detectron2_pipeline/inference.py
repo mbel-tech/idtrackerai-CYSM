@@ -10,7 +10,7 @@ Runs where the GPU is (Colab, a workstation) and produces one small .h5 per
 video. Tracking then happens wherever idtracker.ai lives; the two no longer have
 to be the same machine, and an enhanced video never has to be encoded or moved.
 
-Two models can do the segmenting, and they ask for opposite things:
+Three models can do the segmenting, and they ask for different things:
 
 ``--backend detectron2`` (default)
     A Mask R-CNN fine-tuned on frames you annotated yourself. Costs a day of
@@ -23,6 +23,12 @@ Two models can do the segmenting, and they ask for opposite things:
     is weaker exactly where thresholding is weak: low contrast and small,
     similar animals. Also useful as a first pass to pre-label frames you then
     correct and train on — see ``prelabel.py``.
+
+``--backend yolo``
+    A YOLO segmentation model you trained with ultralytics (``best.pt`` of a
+    ``-seg`` model). Fast, and specific to your setup like the Mask R-CNN. It
+    sees the frames as recorded unless enhancement is asked for, because that
+    is what it was trained on. See ``yolo_predictor.py``.
 
 Whichever runs, the output is the same file in the same format, and everything
 after the masks — cleanup, overlap policy, polygons, the sidecar — is shared.
@@ -41,6 +47,15 @@ or, with no trained model of your own::
         --backend sam3 --prompt fish \\
         --video clip_01.mp4 \\
         --weights sam3.pt \\
+        --output clip_01_contours.h5 \\
+        --max-instances 5
+
+or, with a YOLO segmentation model::
+
+    python detectron2_export_contours.py \\
+        --backend yolo \\
+        --video clip_01.mp4 \\
+        --weights best.pt \\
         --output clip_01_contours.h5 \\
         --max-instances 5
 
@@ -130,6 +145,13 @@ def local_weights(backend: str, weights):
     return resolve_checkpoint(weights)
 
 
+# A YOLO model is trained on the frames as recorded, so that is what it gets
+# unless the session or the command line asks for enhancement. The built-in
+# default (enhancement on) suits the Mask R-CNN route it was written for.
+YOLO_ENHANCEMENT = {"enhance": False}
+YOLO_ENHANCEMENT_LABEL = "the YOLO default (raw frames, as the model was trained)"
+
+
 def video_frame_count(video: Path) -> int:
     cap = cv2.VideoCapture(str(video))
     try:
@@ -185,6 +207,12 @@ def stale_reason(output: Path, video: Path, args, enhancement: dict) -> str | No
         return f"backend differs (file: {attrs.get('backend')!r}, now: {backend!r})"
     if backend == "sam3" and attrs.get("prompt") != args.prompt:
         return f"prompt differs (file: {attrs.get('prompt')!r}, now: {args.prompt!r})"
+    if backend == "yolo":
+        # 0 stands for "the size the model was trained at", in the file and here
+        recorded_imgsz = int(attrs.get("imgsz", 0))
+        imgsz = int(getattr(args, "imgsz", None) or 0)
+        if recorded_imgsz != imgsz:
+            return f"imgsz differs (file: {recorded_imgsz}, now: {imgsz})"
     try:
         recorded_classes = json.loads(attrs.get("classes", "null"))
     except (TypeError, ValueError):
@@ -476,6 +504,21 @@ def build_predictor(args, metadata: dict | None):
             score_threshold=args.score_threshold,
             max_instances=args.max_instances,
         )
+    elif args.backend == "yolo":
+        try:
+            from .yolo_predictor import YoloPredictor
+        except ImportError:  # loaded by path, e.g. from a Colab bundle
+            sys.path.insert(0, str(Path(__file__).resolve().parent))
+            from yolo_predictor import YoloPredictor  # type: ignore[no-redef]
+
+        predictor = YoloPredictor(
+            weights=args.weights,
+            device=args.device,
+            score_threshold=args.score_threshold,
+            max_instances=args.max_instances,
+            imgsz=getattr(args, "imgsz", None),
+            classes=getattr(args, "classes", None),
+        )
     else:
         predictor = Detectron2Predictor(args, metadata)
     return predictor, predictor.description
@@ -699,6 +742,8 @@ def _export_opened_video(
         backend_provenance["exported_intervals"] = json.dumps(todo)
     if args.backend == "sam3":
         backend_provenance["prompt"] = args.prompt
+    if args.backend == "yolo":
+        backend_provenance["imgsz"] = int(getattr(args, "imgsz", None) or 0)
 
     write_contours(
         partial,
@@ -786,12 +831,13 @@ def main():
     )
     parser.add_argument(
         "--backend",
-        choices=("detectron2", "sam3"),
+        choices=("detectron2", "sam3", "yolo"),
         default="detectron2",
         help=(
             "detectron2: a Mask R-CNN fine-tuned on frames you annotated;"
             " sam3: Meta's SAM 3 prompted with a word for the animal, which"
-            " needs no annotation or training but is not specific to your setup"
+            " needs no annotation or training but is not specific to your setup;"
+            " yolo: a YOLO segmentation model trained with ultralytics (best.pt)"
         ),
     )
     parser.add_argument(
@@ -818,7 +864,7 @@ def main():
     parser.add_argument(
         "--weights",
         type=Path,
-        help="model_final.pth (or sam3.pt); 'model_zoo' for the COCO checkpoint"
+        help="model_final.pth (or sam3.pt, or a YOLO best.pt); 'model_zoo' for the COCO checkpoint"
         " of --config, not fine-tuned; 'huggingface' to fetch sam3.pt (gated:"
         " needs a token from an account granted access)",
     )
@@ -868,6 +914,12 @@ def main():
         "--min-size",
         type=int,
         help="inference scale; default: the value training recorded, else 640",
+    )
+    parser.add_argument(
+        "--imgsz",
+        type=int,
+        help="with --backend yolo, the size frames are resized to for the"
+        " network (default: the size the model was trained at)",
     )
     parser.add_argument("--device", default="cuda")
     parser.add_argument(
@@ -927,6 +979,7 @@ def main():
             "--min-size": args.min_size,
             "--prompt": args.prompt,
             "--classes": args.classes,
+            "--imgsz": args.imgsz,
         }
         used = [flag for flag, value in model_flags.items() if value is not None]
         if used:
@@ -963,7 +1016,21 @@ def main():
         "--config": args.config,
         "--classes": args.classes,
     }
-    if args.backend == "sam3":
+    if args.imgsz is not None and args.backend != "yolo":
+        parser.error("--imgsz only applies to --backend yolo")
+    if args.backend == "yolo":
+        if args.prompt:
+            parser.error("--prompt only applies to --backend sam3")
+        # a YOLO model has classes of its own, so --classes stays
+        used = [
+            flag
+            for flag, value in detectron2_only.items()
+            if value is not None and flag != "--classes"
+        ]
+        if used:
+            verb = "only applies" if len(used) == 1 else "only apply"
+            parser.error(f"{', '.join(used)} {verb} to --backend detectron2")
+    elif args.backend == "sam3":
         if not args.prompt:
             parser.error("--backend sam3 needs --prompt, e.g. --prompt fish")
         used = [flag for flag, value in detectron2_only.items() if value is not None]
@@ -990,8 +1057,12 @@ def main():
     # deliberately overrides it. Retyping the flags identically at inference
     # time was the old requirement, and an easy thing to get silently wrong.
     trained_with = (metadata or {}).get("enhancement")
+    if args.backend == "yolo":
+        fallback, label = YOLO_ENHANCEMENT, YOLO_ENHANCEMENT_LABEL
+    else:
+        fallback, label = trained_with, "the model's training record"
     enhancement, notes = fp.resolve_settings(
-        args, fallback=trained_with, fallback_label="the model's training record"
+        args, fallback=fallback, fallback_label=label
     )
     for note in notes:
         print(note)
@@ -1134,7 +1205,7 @@ def main():
 _MODEL_OPTIONS = (
     "backend", "prompt", "config", "num_classes", "min_size", "classes",
     "score_threshold", "on_overlap", "merge_overlap", "min_component",
-    "dilate", "dedup_iou", "min_area", "device",
+    "dilate", "dedup_iou", "min_area", "device", "imgsz",
 )
 
 
@@ -1229,12 +1300,16 @@ def session_jobs(toml_paths, frame_count=video_frame_count) -> list[dict]:
         # its enhancement from; it sees what the session's own `enhancement`
         # key says, as in the Segmentation App. Detectron2 keeps the training
         # record's, so the key plays no part in its export.
+        # YOLO has no training record here either, and was trained on the
+        # frames as recorded: the session's key, and raw frames without one.
         enhancement = None
-        if spec["backend"] == "sam3":
+        if spec["backend"] in ("sam3", "yolo"):
             try:
                 enhancement = fp.normalize_settings(params.get("enhancement"))
             except fp.PreprocessingError as exc:
                 fail(str(exc))
+            if enhancement is None and spec["backend"] == "yolo":
+                enhancement = fp.normalize_settings(dict(YOLO_ENHANCEMENT))
         model_key = json.dumps(
             {k: v for k, v in spec.items() if k != "contours_dir"}
             | {"max_instances": max_instances},
@@ -1259,7 +1334,7 @@ def session_jobs(toml_paths, frame_count=video_frame_count) -> list[dict]:
                 if job["enhancement"] != enhancement:
                     fail(
                         f"{video.name} is also in {job['session']} with a"
-                        " different enhancement, which SAM 3 exports with;"
+                        " different enhancement, which SAM 3 and YOLO export with;"
                         " one contour file cannot serve both"
                     )
                 job["intervals"] = sm.normalize_intervals(
@@ -1330,7 +1405,7 @@ def session_main(args) -> None:
             if run_args.backend == "detectron2" and run_args.weights != sm.MODEL_ZOO
             else None
         )
-        if run_args.backend == "sam3":
+        if run_args.backend in ("sam3", "yolo"):
             # never trained here: the session's enhancement, flags over it
             fallback, label = group[0]["enhancement"], "the session's enhancement key"
         else:

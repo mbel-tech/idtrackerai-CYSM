@@ -1,6 +1,7 @@
 """Chooses where the animals' outlines come from: idtracker.ai's own
 thresholding, or contours from an external segmentation model -- loaded from a
-file, prepared with the Detectron2 pipeline, or produced here by SAM 3.
+file, prepared with the Detectron2 pipeline, or produced here by SAM 3 or by
+a YOLO segmentation model.
 """
 
 import logging
@@ -25,6 +26,9 @@ THRESHOLDING = "Thresholding"
 EXTERNAL = "External contours"
 DETECTRON2 = "Detectron2 pipeline"
 SAM3 = "SAM 3"
+YOLO = "YOLO"
+# the modes that make contours rather than track from them
+MODEL_MODES = (DETECTRON2, SAM3, YOLO)
 
 
 class SegmentationSourceWidget(QWidget):
@@ -36,7 +40,7 @@ class SegmentationSourceWidget(QWidget):
     """
 
     valueChanged = Signal(object)  # Path | None
-    modeChanged = Signal(str)      # one of the three constants above
+    modeChanged = Signal(str)      # one of the mode constants above
 
     def __init__(self):
         super().__init__()
@@ -49,7 +53,7 @@ class SegmentationSourceWidget(QWidget):
         self.label.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         self.source = QComboBox()
-        self.source.addItems((THRESHOLDING, EXTERNAL, DETECTRON2, SAM3))
+        self.source.addItems((THRESHOLDING, EXTERNAL, DETECTRON2, SAM3, YOLO))
         self.source.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.source.setSizePolicy(
             QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Maximum
@@ -115,11 +119,11 @@ class SegmentationSourceWidget(QWidget):
         self.browse.setVisible(external)
         self.modeChanged.emit(text)
 
-        if text in (DETECTRON2, SAM3):
+        if text in MODEL_MODES:
             # Preparing or running a model, not tracking with one yet. There is
             # no contour file at this point, so this must not open a file
             # dialog the way EXTERNAL does; the panel below takes over. When
-            # SAM 3 finishes an export it hands the files back through
+            # SAM 3 or YOLO finishes an export it hands the files back through
             # accept_paths, which switches the mode itself.
             self.valueChanged.emit(None)
             return
@@ -352,8 +356,8 @@ class SegmentationSourceWidget(QWidget):
         were supported round-trip unchanged; several give a list, in the
         session's video order.
 
-        Detectron2 mode deliberately returns None: it is a preparation mode,
-        and nothing about it belongs in the saved parameters.
+        The model modes deliberately return None: they are preparation
+        modes, and nothing about them belongs in the saved parameters.
         """
         if self.source.currentText() != EXTERNAL or not self.paths:
             return None

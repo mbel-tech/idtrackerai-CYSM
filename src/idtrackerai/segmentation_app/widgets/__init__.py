@@ -7,6 +7,7 @@ from .open_video_widget import OpenVideoWidget
 from .ROI_widget import ROIWidget
 from .detectron2_panel import Detectron2Panel
 from .sam3_panel import Sam3Panel
+from .yolo_panel import YoloPanel
 from .enhancement_preview import EnhancementPreview
 from .enhancement_widget import EnhancementWidget
 from .segmentation_source import SegmentationSourceWidget
@@ -23,6 +24,7 @@ __all__ = [
     "EnhancementWidget",
     "Detectron2Panel",
     "Sam3Panel",
+    "YoloPanel",
     "EnhancementPreview",
     "TrackingIntervalsWidget",
     "AreaThresholds",

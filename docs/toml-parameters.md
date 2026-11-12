@@ -51,12 +51,13 @@ Both stages read the same `.toml`:
 
 | Key | Default | Applies to | Meaning |
 |---|---|---|---|
-| `backend` | `'detectron2'` | both | `'detectron2'` (your fine-tuned Mask R-CNN) or `'sam3'` (prompted with a word). |
+| `backend` | `'detectron2'` | all | `'detectron2'` (your fine-tuned Mask R-CNN), `'sam3'` (prompted with a word) or `'yolo'` (a YOLO segmentation model's `best.pt`; see [yolo-pipeline.md](yolo-pipeline.md)). |
 | `weights` | **required** | both | Path to `model_final.pth`, or to `sam3.pt`. `'model_zoo'` loads the stock COCO checkpoint of `config` and needs `classes`. `'huggingface'` (sam3 only) fetches `sam3.pt` from Hugging Face, which needs a token with access. |
 | `contours_dir` | none | both | This session's contour folder, holding one `<video stem>.h5` per video. **Use one folder per session.** GoPro chapter names such as `GX010561` repeat across cameras. |
 | `score_threshold` | `0.7` | both | Detections scoring below this are dropped. |
-| `max_instances` | `number_of_animals` | both | Most detections kept per frame. Leave it unset so it follows the bird count for that pen and day. With SAM 3, `0` keeps every detection. |
+| `max_instances` | `number_of_animals` | both | Most detections kept per frame. Leave it unset so it follows the bird count for that pen and day. With SAM 3 and YOLO, `0` keeps every detection. |
 | `prompt` | none | sam3 (required) | The word for the animal, e.g. `'chicken'`. |
+| `imgsz` | the model's own | yolo | Size frames are resized to for the network. Unset, the size the model was trained at. |
 | `config` | from `training_metadata.json`, else `mask_rcnn_R_50_FPN_3x` | detectron2 | The model-zoo config the model was fine-tuned from. |
 | `num_classes` | from `training_metadata.json`, else 1 (80 for `model_zoo`) | detectron2 | Number of classes in the model. |
 | `classes` | all | detectron2 | Class indices to keep, e.g. `[14]` for COCO's "bird" with `weights = 'model_zoo'`. |

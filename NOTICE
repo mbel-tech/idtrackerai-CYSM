@@ -311,6 +311,27 @@ Files added:
   docs/sam3-pipeline.md
       Documentation for the SAM 3 route.
 
+  src/idtrackerai/extra_tools/detectron2_pipeline/yolo_predictor.py
+      A YOLO segmentation model (ultralytics best.pt) behind the same
+      predict(frame) -> (masks, scores) interface, as a third backend of
+      the contour exporter. Calls the ultralytics package when the user
+      has installed it; contains none of it.
+
+  src/idtrackerai/extra_tools/detectron2_pipeline/yolo_import.py
+      Converts the label files of a YOLO segmentation prediction into the
+      contour sidecar, for runs that were already made elsewhere.
+
+  src/idtrackerai/segmentation_app/widgets/yolo_panel.py
+      The YOLO mode of the Segmentation App: exporting contours with a
+      chosen best.pt, and importing label files.
+
+  tests/yolo_backend_test.py, tests/yolo_import_test.py,
+  tests/yolo_panel_test.py
+      Tests for the YOLO route, driven by a stand-in ultralytics.
+
+  docs/yolo-pipeline.md, docs/yolo-session-template.toml
+      Documentation and a session template for the YOLO route.
+
   src/idtrackerai/extra_tools/detectron2_pipeline/segmentation_model.py
   tests/segmentation_model_test.py
       The [segmentation_model] table of a session .toml, read by the
@@ -348,16 +369,27 @@ Each carries its own licence:
   OpenCV       Apache-2.0   https://opencv.org
   LabelMe      GPL-3.0      https://github.com/wkentaro/labelme
   SAM 3        SAM License  https://github.com/facebookresearch/sam3
+  Ultralytics  AGPL-3.0     https://github.com/ultralytics/ultralytics
 
-None of them is distributed with this software. Detectron2 and SAM 3 are
-both optional and are installed separately by whoever runs the GPU stages.
+None of them is distributed with this software. Detectron2, SAM 3 and
+Ultralytics are optional and are installed separately by whoever runs the
+GPU stages.
 
 The SAM 3 licence deserves a note. It is Meta's own "SAM License", not an
 OSI-approved licence, and it governs both the sam3 package and the sam3.pt
 weights. Its terms, including its acceptable use policy, are neither
 granted nor restricted by this project's GPL-3.0, and anyone using the
 SAM 3 route should read it. The ultralytics package can load the same
-weights and was not used, because it is AGPL-3.0.
+weights and was not used for SAM 3, because it is AGPL-3.0.
+
+The YOLO route does call ultralytics, and only that route does. It is not
+a dependency of this package, is imported only inside the YOLO backend, and
+is installed by the user who wants that route. Ultralytics licenses the
+package, and by its own terms the weights trained with it, under AGPL-3.0
+(or a commercial licence it sells). Running a YOLO model for your own
+analysis and publishing the results is use, not distribution. Anyone
+distributing a combined work, or offering one as a network service, has to
+meet the AGPL's terms for it, and should read that licence first.
 
 See CITATION.cff and README.md for the papers to cite.
 

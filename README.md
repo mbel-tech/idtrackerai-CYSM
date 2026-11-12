@@ -200,6 +200,27 @@ use. Drafting a few hundred frames on a CPU is merely slow, and is offered.
 
 See **[docs/sam3-pipeline.md](docs/sam3-pipeline.md)**.
 
+### Segmenting with a YOLO model
+
+Set **Segmentation → YOLO** when you already have a YOLO *segmentation* model
+trained with ultralytics. Choose its `best.pt` and **Export contours**: the
+model runs over the session's clips and the session switches onto the contour
+files, as with SAM 3. Label files of a prediction that was already run
+(`save_txt=True`) can be imported instead of running the model again.
+
+```bash
+idtrackerai_d2_export --session session.toml        # [segmentation_model] backend = 'yolo'
+idtrackerai_d2_export --backend yolo --weights best.pt --videos 'clips/*.mp4' --output-dir contours/
+idtrackerai_yolo_import --video clip.mp4 --labels runs/segment/predict/labels --output contours/clip.h5
+```
+
+Boxes from a detection model and tables of centre points cannot be tracked
+from: idtracker.ai identifies each animal from the pixels inside its outline.
+`ultralytics` is AGPL-3.0, is never installed by this package, and is only
+needed on the machine that runs the model.
+
+See **[docs/yolo-pipeline.md](docs/yolo-pipeline.md)**.
+
 ### Tracking with the result
 
 Point a session at the contour file, in the `.toml`:

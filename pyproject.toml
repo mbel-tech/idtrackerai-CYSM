@@ -145,6 +145,9 @@ idtrackerai_d2_install_gpu = "idtrackerai.extra_tools.detectron2_pipeline.instal
 # drafting annotations for you to correct, and exporting contours directly.
 # The exporter is idtrackerai_d2_export --backend sam3.
 idtrackerai_sam3_prelabel = "idtrackerai.extra_tools.detectron2_pipeline.prelabel:main"
+# A YOLO segmentation model exports through idtrackerai_d2_export --backend
+# yolo. This imports the label files of a run that was already made elsewhere.
+idtrackerai_yolo_import = "idtrackerai.extra_tools.detectron2_pipeline.yolo_import:main"
 
 [tool.pytest.ini_options]
 log_file_format = "%(asctime)s %(levelname)8s %(message)s (%(filename)s:%(lineno)s)"

@@ -19,7 +19,8 @@ from dataclasses import dataclass, field
 # one place to look when it needs changing.
 PROBE = """
 import json
-report = {"torch": None, "detectron2": None, "sam3": None, "cuda": False,
+report = {"torch": None, "detectron2": None, "sam3": None,
+          "ultralytics": None, "cuda": False,
           "device": None, "notes": []}
 try:
     import torch
@@ -53,6 +54,12 @@ try:
             report["sam3"] = importlib.metadata.version("sam3")
         except Exception:
             report["sam3"] = "unknown"
+    # ultralytics likewise: its import is slow and loads torch a second way
+    if importlib.util.find_spec("ultralytics") is not None:
+        try:
+            report["ultralytics"] = importlib.metadata.version("ultralytics")
+        except Exception:
+            report["ultralytics"] = "unknown"
 except Exception:
     pass
 print(json.dumps(report))
@@ -66,6 +73,7 @@ class GpuReport:
     torch_version: str | None = None
     detectron2_version: str | None = None
     sam3_version: str | None = None
+    ultralytics_version: str | None = None
     cuda_available: bool = False
     device_name: str | None = None
     notes: list[str] = field(default_factory=list)
@@ -96,6 +104,24 @@ class GpuReport:
             gaps.append("PyTorch cannot see a CUDA GPU")
         if self.sam3_version is None:
             gaps.append("the sam3 package is not installed")
+        return gaps
+
+    @property
+    def yolo_usable(self) -> bool:
+        """True when a YOLO model can export here: a CUDA GPU and ultralytics.
+        Its own question for the same reason SAM 3 has one."""
+        return bool(self.cuda_available and self.ultralytics_version)
+
+    @property
+    def yolo_missing(self) -> list[str]:
+        """What stands between this machine and a YOLO run."""
+        gaps = []
+        if self.torch_version is None:
+            gaps.append("PyTorch is not installed")
+        elif not self.cuda_available:
+            gaps.append("PyTorch cannot see a CUDA GPU")
+        if self.ultralytics_version is None:
+            gaps.append("the ultralytics package is not installed")
         return gaps
 
     @property
@@ -156,6 +182,7 @@ def describe_gpu(python: str | None = None, timeout: float = 60.0) -> GpuReport:
     report.torch_version = data.get("torch")
     report.detectron2_version = data.get("detectron2")
     report.sam3_version = data.get("sam3")
+    report.ultralytics_version = data.get("ultralytics")
     report.cuda_available = bool(data.get("cuda"))
     report.device_name = data.get("device")
     report.notes = list(data.get("notes") or [])
@@ -182,4 +209,16 @@ SAM3_INSTALL_HINT = (
     "SAM 3 is a 3.4 GB model. Drafting a few hundred annotation frames on a "
     "CPU is slow but workable; exporting a whole video is not, and the Colab "
     "notebook does that on a hosted GPU instead."
+)
+
+
+YOLO_INSTALL_HINT = (
+    "To run a YOLO model here you need a CUDA GPU, PyTorch built for it, and "
+    "the ultralytics package.\n\n"
+    "  1. Install PyTorch for your CUDA version from pytorch.org\n"
+    "  2. pip install ultralytics\n\n"
+    "ultralytics is AGPL-3.0 and is never installed by idtracker.ai itself. "
+    "Without a GPU the export still runs, at a few frames per second: fine "
+    "for a short clip, and the Colab notebook does whole videos on a hosted "
+    "GPU instead."
 )

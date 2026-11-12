@@ -292,6 +292,9 @@ class Sam3PrelabelThread(QThread):
 class Sam3ExportThread(QThread):
     """Exports contour sidecars with SAM 3, one file per clip."""
 
+    # what the progress dialog and error messages call the model
+    model_name = "SAM 3"
+
     set_progress_value = Signal(int)
     set_progress_max = Signal(int)
     set_progress_label = Signal(str)
@@ -346,16 +349,13 @@ class Sam3ExportThread(QThread):
             self.set_progress_max.emit(max(total, 1))
         self.set_progress_value.emit(done)
 
-    def run(self):
-        from argparse import Namespace
+    def _load_predictor(self, inference_mod):
+        """The model, loaded; or None after saying through ``failed`` why not.
 
+        May replace ``self.weights`` with the local file really used, so that
+        is the one hashed and recorded.
+        """
         try:
-            from idtrackerai.extra_tools.detectron2_pipeline import (
-                inference as inference_mod,
-            )
-            from idtrackerai.extra_tools.detectron2_pipeline import (
-                preprocessing as preprocessing_mod,
-            )
             from idtrackerai.extra_tools.detectron2_pipeline.sam3_predictor import (
                 Sam3Predictor,
             )
@@ -364,7 +364,7 @@ class Sam3ExportThread(QThread):
                 f"SAM 3 is not installed in this environment ({exc}).\n\n"
                 "Install it with:  pip install sam3"
             )
-            return
+            return None
 
         # weights = "huggingface" becomes the cached sam3.pt here, before
         # anything hashes it, so the contour files record the real checkpoint
@@ -374,10 +374,10 @@ class Sam3ExportThread(QThread):
             self.weights = inference_mod.local_weights("sam3", self.weights)
         except Exception as exc:  # noqa: BLE001 - Sam3WeightsError, explained
             self.failed.emit(str(exc))
-            return
+            return None
 
         try:
-            predictor = Sam3Predictor(
+            return Sam3Predictor(
                 checkpoint=self.weights,
                 prompt=self.prompt,
                 device=self.device,
@@ -386,17 +386,32 @@ class Sam3ExportThread(QThread):
             )
         except FileNotFoundError as exc:
             self.failed.emit(str(exc))
-            return
         except Exception as exc:  # noqa: BLE001
             logging.exception("Could not load SAM 3")
             self.failed.emit(f"Could not load SAM 3: {exc}")
+        return None
+
+    def _backend_args(self) -> dict:
+        """The exporter options only this backend has."""
+        return {"backend": "sam3", "prompt": self.prompt, "classes": None}
+
+    def run(self):
+        from argparse import Namespace
+
+        from idtrackerai.extra_tools.detectron2_pipeline import (
+            inference as inference_mod,
+        )
+        from idtrackerai.extra_tools.detectron2_pipeline import (
+            preprocessing as preprocessing_mod,
+        )
+
+        predictor = self._load_predictor(inference_mod)
+        if predictor is None:
             return
 
         # The same defaults the exporter's own command line uses, so a run
         # started here and one started from a terminal agree.
         args = Namespace(
-            backend="sam3",
-            prompt=self.prompt,
             weights=self.weights,
             score_threshold=self.score_threshold,
             max_instances=self.max_instances,
@@ -410,8 +425,8 @@ class Sam3ExportThread(QThread):
             local_cache=None,
             keep_cache=False,
             progress_every=1_000_000,  # the progress bar reports instead
-            classes=None,
             intervals=None,
+            **self._backend_args(),
         )
         enhance = preprocessing_mod.make_enhancer_from(self.enhancement)
 
@@ -427,7 +442,7 @@ class Sam3ExportThread(QThread):
             if self.tracking_intervals
             else [None] * len(self.videos)
         )
-        self.set_progress_label.emit("Hashing the SAM 3 checkpoint...")
+        self.set_progress_label.emit(f"Hashing the {self.model_name} weights...")
         args.weights_sha256 = inference_mod.weights_sha256(self.weights)
 
         try:
@@ -458,7 +473,8 @@ class Sam3ExportThread(QThread):
                     continue
 
                 self.set_progress_label.emit(
-                    f"SAM 3 on {video.name}  ({index} of {len(self.videos)})"
+                    f"{self.model_name} on {video.name}"
+                    f"  ({index} of {len(self.videos)})"
                 )
                 stats = inference_mod.export_video(
                     video,
@@ -478,5 +494,75 @@ class Sam3ExportThread(QThread):
         except PipelineError as exc:
             self.failed.emit(str(exc))
         except Exception as exc:  # noqa: BLE001
-            logging.exception("SAM 3 export failed")
+            logging.exception("%s export failed", self.model_name)
             self.failed.emit(str(exc))
+
+
+class YoloExportThread(Sam3ExportThread):
+    """Exports contour sidecars with a YOLO segmentation model.
+
+    The batch -- resume, tracked frames only, progress, cancelling -- is SAM
+    3's, unchanged; only the model and the options it takes differ.
+    """
+
+    model_name = "YOLO"
+
+    def set_parameters(  # type: ignore[override]
+        self,
+        videos: list[Path],
+        output_dir: Path,
+        weights: Path,
+        device: str,
+        score_threshold: float,
+        max_instances: int,
+        enhancement: dict,
+        imgsz: int | None = None,
+        classes: list[int] | None = None,
+        on_overlap: str = "merge",
+        overwrite: bool = False,
+        tracking_intervals=None,
+    ) -> None:
+        super().set_parameters(
+            videos=videos,
+            output_dir=output_dir,
+            weights=weights,
+            prompt="",
+            device=device,
+            score_threshold=score_threshold,
+            max_instances=max_instances,
+            enhancement=enhancement,
+            on_overlap=on_overlap,
+            overwrite=overwrite,
+            tracking_intervals=tracking_intervals,
+        )
+        self.imgsz = imgsz or None
+        self.classes = classes or None
+
+    def _load_predictor(self, inference_mod):
+        # Looked up on the module at call time, not imported by name, so the
+        # class is the one in place when the export actually starts.
+        from idtrackerai.extra_tools.detectron2_pipeline import yolo_predictor
+
+        try:
+            return yolo_predictor.YoloPredictor(
+                weights=self.weights,
+                device=self.device,
+                score_threshold=self.score_threshold,
+                max_instances=self.max_instances,
+                imgsz=self.imgsz,
+                classes=self.classes,
+            )
+        except (FileNotFoundError, yolo_predictor.YoloWeightsError) as exc:
+            self.failed.emit(str(exc))
+        except Exception as exc:  # noqa: BLE001
+            logging.exception("Could not load the YOLO model")
+            self.failed.emit(f"Could not load the YOLO model: {exc}")
+        return None
+
+    def _backend_args(self) -> dict:
+        return {
+            "backend": "yolo",
+            "prompt": None,
+            "imgsz": self.imgsz,
+            "classes": self.classes,
+        }
