@@ -94,16 +94,17 @@ session avoids the question.
 
 | Key | Default | Meaning |
 |---|---|---|
-| `backend` | `'detectron2'` | `'detectron2'` (a Mask R-CNN) or `'sam3'` (prompted with a word). |
+| `backend` | `'detectron2'` | `'detectron2'` (a Mask R-CNN), `'sam3'` (prompted with a word) or `'yolo'` (a YOLO segmentation model trained with ultralytics; see [yolo-pipeline.md](yolo-pipeline.md)). |
 | `weights` | required | Path of `model_final.pth` (or `sam3.pt`). `'model_zoo'` loads the COCO checkpoint of `config` with no fine-tuning, and then needs `classes`. `'huggingface'` (SAM 3 only) fetches `sam3.pt` from Hugging Face; contour files then record `sam3.pt` and its hash as for a chosen file. |
 | `contours_dir` | none | Folder of this session's contour files, `<video stem>.h5` each. Needed unless `external_contours` lists the files. |
 | `score_threshold` | `0.7` | Detections scoring below this are dropped. |
-| `max_instances` | `number_of_animals` | Most detections kept per frame. Leave it unset so it follows the bird count; set it only to cap below or above that. With SAM 3, `0` keeps every detection it reports. |
+| `max_instances` | `number_of_animals` | Most detections kept per frame. Leave it unset so it follows the bird count; set it only to cap below or above that. With SAM 3 and YOLO, `0` keeps every detection reported. |
 | `config` | from `training_metadata.json`, else `mask_rcnn_R_50_FPN_3x` | Detectron2 model-zoo config the model was fine-tuned from. |
 | `num_classes` | from `training_metadata.json`, else 1 (80 for `model_zoo`) | Detectron2 only. |
 | `classes` | all | Class indices to keep, e.g. `[14]` for COCO's bird with `weights = 'model_zoo'`. Detectron2 only. |
 | `min_size` | from `training_metadata.json`, else 640 | Short side the frame is resized to for inference. Must match training. Detectron2 only. |
 | `prompt` | none | SAM 3 only, and required there: the word for the animal. |
+| `imgsz` | the model's own | YOLO only: the size frames are resized to for the network. Unset, the size the model was trained at. |
 | `on_overlap` | `'merge'` | `'merge'`: overlapping animals become one blob and idtracker.ai's crossing detection takes over. `'split'`: the detector separates them. `'keep'`: masks untouched. |
 | `merge_overlap` | `0.15` | With `merge`: fuse two masks whose intersection covers this fraction of the smaller one. |
 | `min_component`, `dilate`, `dedup_iou`, `min_area` | `80`, `1`, `0.7`, `1.0` | Mask clean-up, as the exporter's flags of the same names. |

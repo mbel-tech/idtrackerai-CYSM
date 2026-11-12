@@ -51,7 +51,7 @@ def test_no_table_means_no_model():
     [
         ({"weights": "w.pth", "score_treshold": 0.5}, "score_treshold"),
         ({}, "weights is missing"),
-        ({"weights": "w.pth", "backend": "yolo"}, "backend"),
+        ({"weights": "w.pth", "backend": "rfdetr"}, "backend"),
         ({"weights": "sam3.pt", "backend": "sam3"}, "prompt"),
         ({"weights": "w.pth", "prompt": "chicken"}, "only applies"),
         (

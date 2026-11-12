@@ -71,7 +71,7 @@ def test_the_selector_offers_sam3(qt_app):
     widget = SegmentationSourceWidget()
     modes = [widget.source.itemText(i) for i in range(widget.source.count())]
 
-    assert modes == [THRESHOLDING, EXTERNAL, DETECTRON2, SAM3]
+    assert modes[:4] == [THRESHOLDING, EXTERNAL, DETECTRON2, SAM3]
 
 
 def test_choosing_sam3_does_not_open_a_file_dialog(qt_app):

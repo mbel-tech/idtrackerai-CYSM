@@ -25,6 +25,14 @@ Example::
     min_size = 640
     contours_dir = "/content/drive/MyDrive/broilercamp/contours/R2_01_10_P1_SB"
 
+or, with a YOLO segmentation model you trained (ultralytics ``best.pt``)::
+
+    [segmentation_model]
+    backend = "yolo"
+    weights = "/content/drive/MyDrive/broilercamp/yolo/best.pt"
+    score_threshold = 0.5
+    contours_dir = "/content/drive/MyDrive/broilercamp/contours/R2_01_10_P1_SB"
+
 Kept free of idtracker.ai imports: the Colab bundle ships this file next to the
 exporter, where idtracker.ai is not installed.
 """
@@ -35,7 +43,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-BACKENDS = ("detectron2", "sam3")
+BACKENDS = ("detectron2", "sam3", "yolo")
 OVERLAP_POLICIES = ("merge", "split", "keep")
 
 # Same defaults as the exporter's command line, so a table that sets only
@@ -47,6 +55,7 @@ DEFAULTS: dict[str, Any] = {
     "num_classes": None,
     "classes": None,
     "min_size": None,
+    "imgsz": None,
     "prompt": None,
     "score_threshold": 0.7,
     "max_instances": None,
@@ -61,6 +70,11 @@ DEFAULTS: dict[str, Any] = {
 }
 
 DETECTRON2_ONLY = ("config", "num_classes", "min_size", "classes")
+# A YOLO model has classes too, so a table may pick among them; the rest of
+# the Detectron2 keys describe a Mask R-CNN and mean nothing to it.
+NOT_FOR_YOLO = ("config", "num_classes", "min_size")
+# Backends whose contours can be left uncapped (max_instances = 0).
+UNCAPPED_BACKENDS = ("sam3", "yolo")
 
 # weights = "model_zoo" loads the COCO-trained checkpoint of the config itself,
 # with no fine-tuning: 80 classes, of which COCO_BIRD is the one poultry
@@ -142,7 +156,8 @@ def normalize_model(spec: dict | None) -> dict | None:
     if not out["weights"]:
         raise SegmentationModelError(
             "segmentation_model.weights is missing: the path of the model the"
-            " contours are made with (model_final.pth, or sam3.pt)"
+            " contours are made with (model_final.pth, sam3.pt, or a YOLO"
+            " best.pt)"
         )
     out["weights"] = str(out["weights"])
     if out["weights"].lower() == MODEL_ZOO:
@@ -160,7 +175,22 @@ def normalize_model(spec: dict | None) -> dict | None:
     if out["contours_dir"] is not None:
         out["contours_dir"] = str(out["contours_dir"])
 
-    if out["backend"] == "sam3":
+    if out["imgsz"] is not None and out["backend"] != "yolo":
+        raise SegmentationModelError(
+            'segmentation_model.imgsz only applies to backend = "yolo"'
+        )
+    if out["backend"] == "yolo":
+        if out["prompt"]:
+            raise SegmentationModelError(
+                'segmentation_model.prompt only applies to backend = "sam3"'
+            )
+        used = [key for key in NOT_FOR_YOLO if given.get(key) is not None]
+        if used:
+            raise SegmentationModelError(
+                f"segmentation_model.{', '.join(used)} only apply to"
+                ' backend = "detectron2"'
+            )
+    elif out["backend"] == "sam3":
         if not out["prompt"]:
             raise SegmentationModelError(
                 'segmentation_model.backend = "sam3" needs a prompt, e.g.'
@@ -179,14 +209,15 @@ def normalize_model(spec: dict | None) -> dict | None:
 
     _number(out, "score_threshold", float, 0, 1)
     _number(out, "max_instances", int, 0)
-    if out["max_instances"] == 0 and out["backend"] != "sam3":
+    if out["max_instances"] == 0 and out["backend"] not in UNCAPPED_BACKENDS:
         raise SegmentationModelError(
             "segmentation_model.max_instances = 0 (keep every detection) is"
-            ' only for backend = "sam3"; Detectron2 needs a cap. Leave it out'
-            " to use number_of_animals"
+            ' only for backend = "sam3" or "yolo"; Detectron2 needs a cap.'
+            " Leave it out to use number_of_animals"
         )
     _number(out, "num_classes", int, 1)
     _number(out, "min_size", int, 32)
+    _number(out, "imgsz", int, 32)
     _number(out, "merge_overlap", float, 0, 1, low_open=True)
     _number(out, "min_component", int, 0)
     _number(out, "dilate", int, 0)
@@ -233,7 +264,7 @@ def effective_max_instances(spec: dict, number_of_animals: int | None) -> int:
     guess, and a pen whose count changes by day gets the right cap each day.
     """
     if spec.get("max_instances") is not None:
-        # 0 is SAM 3's "keep everything it reports"
+        # 0 is "keep everything it reports", for SAM 3 and YOLO
         return int(spec["max_instances"])
     if number_of_animals and number_of_animals > 0:
         return int(number_of_animals)
@@ -414,6 +445,14 @@ def mismatches(
             problems.append(
                 f"classes are {recorded}, the table says {spec.get('classes')}"
             )
+    if (
+        spec.get("imgsz") is not None
+        and "imgsz" in attrs
+        and int(attrs["imgsz"]) != spec["imgsz"]
+    ):
+        problems.append(
+            f"imgsz is {int(attrs['imgsz'])}, the table says {spec['imgsz']}"
+        )
     if (
         spec["backend"] == "sam3"
         and "prompt" in attrs

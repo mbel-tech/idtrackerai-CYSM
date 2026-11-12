@@ -46,10 +46,17 @@ from .widgets import (
     OpenVideoWidget,
     ROIWidget,
     Sam3Panel,
+    YoloPanel,
     SegmentationSourceWidget,
     TrackingIntervalsWidget,
 )
-from .widgets.segmentation_source import DETECTRON2, EXTERNAL, SAM3, THRESHOLDING
+from .widgets.segmentation_source import (
+    DETECTRON2,
+    EXTERNAL,
+    SAM3,
+    THRESHOLDING,
+    YOLO,
+)
 
 
 class SegmentationGUI(GUIBase):
@@ -87,17 +94,21 @@ class SegmentationGUI(GUIBase):
         self.enhancement_preview = EnhancementPreview()
         self.detectron2_panel = Detectron2Panel(self.enhancement)
         self.sam3_panel = Sam3Panel(self.enhancement)
+        self.yolo_panel = YoloPanel(self.enhancement)
         # the preview is live in every mode, because the enhancement is applied
         # to segmentation in every mode
         self.enhancement_preview.set_enabled(True)
         self.detectron2_panel.setVisible(False)
         self.sam3_panel.setVisible(False)
+        self.yolo_panel.setVisible(False)
         # so GUIBase.closeEvent gives it a chance to stop threads and save
         self.widgets_to_close.append(self.detectron2_panel)
         self.widgets_to_close.append(self.sam3_panel)
+        self.widgets_to_close.append(self.yolo_panel)
         # an export hands its contour files to the source widget, which
         # validates them against the video before the session adopts them
         self.sam3_panel.contoursReady.connect(self.sam3_contours_ready)
+        self.yolo_panel.contoursReady.connect(self.yolo_contours_ready)
         self.intensity_thresholds = IntensityThresholds(self, min=0, max=255)
         self.area_thresholds = AreaThresholds()
 
@@ -148,6 +159,8 @@ class SegmentationGUI(GUIBase):
         self.n_animals.valueChanged.connect(self.detectron2_panel.set_number_of_animals)
         self.n_animals.valueChanged.connect(self.sam3_panel.set_number_of_animals)
         self.sam3_panel.tracking_intervals = lambda: self.tracking_interval.value()
+        self.n_animals.valueChanged.connect(self.yolo_panel.set_number_of_animals)
+        self.yolo_panel.tracking_intervals = lambda: self.tracking_interval.value()
         self.n_animals.valueChanged.connect(self.blobInfo.setNAnimals)
         self.tracking_interval.range_slider.single_value_changed.connect(
             self.videoPlayer.setCurrentFrame
@@ -201,6 +214,7 @@ class SegmentationGUI(GUIBase):
         self.enhancement.setToolTips(tooltips)
         self.detectron2_panel.setToolTips(tooltips)
         self.sam3_panel.setToolTips(tooltips)
+        self.yolo_panel.setToolTips(tooltips)
         self.bkg_widget.setToolTip(tooltips["background_subtraction"])
         self.bkg_widget.bkg_stat.setToolTip(tooltips["background_stat"])
         self.bkg_widget.view_bkg.setToolTip(tooltips["background_view"])
@@ -232,6 +246,7 @@ class SegmentationGUI(GUIBase):
             self.segmentation_source,
             self.detectron2_panel,
             self.sam3_panel,
+            self.yolo_panel,
             self.bkg_widget,
             self.intensity_thresholds,
             self.area_thresholds,
@@ -325,6 +340,19 @@ class SegmentationGUI(GUIBase):
         self.bkg_widget.enhancement_changed(settings)
         self.detectron2_panel.enhancement_committed(settings)
         self.sam3_panel.enhancement_committed(settings)
+        self.yolo_panel.enhancement_committed(settings)
+
+    def yolo_contours_ready(self, paths) -> None:
+        """Adopts contours the YOLO panel exported or imported; as for SAM 3,
+        success is announced only once the source widget has accepted them."""
+        if self.segmentation_source.accept_paths(paths):
+            QMessageBox.information(
+                self,
+                "Tracking from the YOLO contours",
+                f"This session now segments from the {len(paths)} contour "
+                "file(s) written from YOLO. The intensity thresholds and "
+                "background model take no further part.",
+            )
 
     def sam3_contours_ready(self, paths) -> None:
         """Adopts contours SAM 3 just exported, and says whether it worked.
@@ -367,10 +395,12 @@ class SegmentationGUI(GUIBase):
         external = mode == EXTERNAL
         detectron2 = mode == DETECTRON2
         sam3 = mode == SAM3
-        with_a_model = detectron2 or sam3
+        yolo = mode == YOLO
+        with_a_model = detectron2 or sam3 or yolo
 
         self.detectron2_panel.setVisible(detectron2)
         self.sam3_panel.setVisible(sam3)
+        self.yolo_panel.setVisible(yolo)
         self.frame_analyzer.set_suspended(with_a_model)
 
         for widget in (self.intensity_thresholds, self.bkg_widget):
@@ -393,6 +423,7 @@ class SegmentationGUI(GUIBase):
         self.enhancement.setSettings(self.session.enhancement)
         self.detectron2_panel.set_model_spec(self.session.segmentation_model)
         self.sam3_panel.set_model_spec(self.session.segmentation_model)
+        self.yolo_panel.set_model_spec(self.session.segmentation_model)
         contours = self.contours_to_show()
         self.segmentation_source.setValue(contours)
         backend = (self.session.segmentation_model or {}).get("backend", "detectron2")
@@ -400,7 +431,7 @@ class SegmentationGUI(GUIBase):
             # a .toml naming a model whose contours are not exported yet opens
             # on the panel that exports them, not on thresholding
             self.segmentation_source.source.setCurrentText(
-                SAM3 if backend == "sam3" else DETECTRON2
+                {"sam3": SAM3, "yolo": YOLO}.get(backend, DETECTRON2)
             )
         self.intensity_thresholds.setValue(self.session.intensity_ths)
         self.area_thresholds.setValue(self.session.area_ths)
@@ -575,6 +606,8 @@ class SegmentationGUI(GUIBase):
             return self.detectron2_panel
         if mode == SAM3:
             return self.sam3_panel
+        if mode == YOLO:
+            return self.yolo_panel
         if mode != EXTERNAL or external_contours is None:
             return None
         first = (
@@ -588,7 +621,9 @@ class SegmentationGUI(GUIBase):
         except OSError:
             return None
         backend = backend.decode() if isinstance(backend, bytes) else str(backend)
-        panel = self.sam3_panel if backend == "sam3" else self.detectron2_panel
+        panel = {"sam3": self.sam3_panel, "yolo": self.yolo_panel}.get(
+            backend, self.detectron2_panel
+        )
         return panel if panel.has_chosen_weights() else None
 
     def unacceptable_parameters(self, parameters: dict) -> bool:
@@ -665,6 +700,7 @@ class SegmentationGUI(GUIBase):
         self.segmentation_source.set_video_info(n_frames, video_size, video_paths)
         self.detectron2_panel.set_video_context(video_paths, self.session.output_dir)
         self.sam3_panel.set_video_context(video_paths, self.session.output_dir)
+        self.yolo_panel.set_video_context(video_paths, self.session.output_dir)
         self.videoPlayer.setEnabled(False)
         self.tracking_interval.reset(n_frames)
         self.frame_analyzer.drawn_frame = -1

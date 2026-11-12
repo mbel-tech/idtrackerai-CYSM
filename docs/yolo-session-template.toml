@@ -1,0 +1,40 @@
+# A session segmented by a YOLO segmentation model you trained (ultralytics
+# best.pt), tracked with identities. Copy this file, fill in everything marked
+# FILL IN, and see docs/yolo-pipeline.md for what each key does and how to run it.
+
+name = 'my_session'                                  # FILL IN
+video_paths = ['/path/to/clip_01.mp4']               # FILL IN, in recording order
+number_of_animals = 9                                # FILL IN: also caps detections per frame
+track_wo_identities = false                          # false: one trajectory per animal
+tracking_intervals = [[0, 25920]]                    # FILL IN, or delete to track everything
+output_dir = '/path/to/idtracker_out'                # FILL IN
+area_ths = [300.0, inf]                              # still filters the model's outlines
+use_bkg = false
+
+# The arena, minus what is not floor. A '+' line is where animals are tracked;
+# every '-' line is cut out of it (feeders, drinkers). An outline whose centre
+# falls in a '-' area is dropped before tracking, so a detection on a feeder
+# never becomes an animal.
+roi_list = [
+    '+ Polygon [[577, 85], [1370, 92], [1317, 843], [605, 843]]',     # FILL IN: the pen
+    '- Polygon [[900, 400], [1000, 400], [1000, 500], [900, 500]]',   # FILL IN: a feeder
+]
+
+# Tables go after every plain key: anything below a [table] line belongs to it.
+[segmentation_model]
+backend = 'yolo'
+
+# The best.pt of a *segmentation* model (e.g. yolo26m-seg). A detection model
+# is refused: idtracker.ai identifies animals from the pixels inside each
+# outline, and boxes have none.
+weights = '/path/to/best.pt'                         # FILL IN
+
+# One folder per session: contour files are named after their clip, and
+# clips from different cameras can share a name.
+contours_dir = '/path/to/contours/my_session'        # FILL IN
+
+score_threshold = 0.5     # the confidence the model was validated at
+# imgsz = 1280            # unset: the size the model was trained at
+# max_instances = 0       # unset: follows number_of_animals. 0 keeps every detection.
+# classes = [0]           # unset: every class the model has
+# on_overlap = 'merge'    # touching animals become one blob for crossing detection

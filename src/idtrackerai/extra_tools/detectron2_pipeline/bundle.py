@@ -46,6 +46,8 @@ PIPELINE_FILES = [
     # CUDA card to run it on.
     ("sam3_predictor.py", "tools/sam3_predictor.py"),
     ("prelabel.py", "tools/sam3_prelabel.py"),
+    # the backend the exporter loads for --backend yolo
+    ("yolo_predictor.py", "tools/yolo_predictor.py"),
     ("notebooks/colab_detectron2_pipeline.ipynb", "colab_detectron2_pipeline.ipynb"),
 ]
 
