@@ -68,6 +68,7 @@ from idtrackerai.extra_tools.detectron2_pipeline.errors import SamplingError
 from idtrackerai.GUI_tools import WrappedLabel
 
 from .enhancement_widget import EnhancementWidget
+from .colab_notebook_export import ColabNotebookExport
 from .pipeline_threads import (
     DatasetThread,
     FrameCountThread,
@@ -99,7 +100,7 @@ def labelme_missing_message(
     )
 
 
-class Detectron2Panel(QWidget):
+class Detectron2Panel(ColabNotebookExport, QWidget):
     """Walks the user from raw video to a training-ready COCO dataset."""
 
     needToDraw = Signal()
@@ -628,6 +629,7 @@ class Detectron2Panel(QWidget):
         layout.addLayout(form)
         layout.addWidget(self.export_command)
         layout.addWidget(self.copy_command_button)
+        layout.addWidget(self.make_notebook_button())
         return page
 
     def save_colab_bundle(self) -> None:
@@ -1702,6 +1704,7 @@ class Detectron2Panel(QWidget):
             (self.score_threshold, "d2_score_threshold"),
             (self.export_command, "d2_export"),
             (self.copy_command_button, "d2_export"),
+            (self.notebook_button, "d2_notebook"),
             (self.export_status, "d2_export"),
             (self.enhancement_status, "enhancement"),
         ]

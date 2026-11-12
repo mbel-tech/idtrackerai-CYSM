@@ -118,7 +118,38 @@ The two commands report success differently
   `session_<name>/trajectories/trajectories.npy` exists and `Success` is in
   `session_<name>/idtrackerai.log`.
 
-### In Colab
+### In Colab, from one notebook
+
+The quickest way to a GPU. In the Segmentation App, the YOLO panel's **Save
+Colab notebook...** button writes the open session as a notebook; from a
+terminal, one notebook can carry many saved sessions:
+
+```bash
+idtrackerai_colab_notebook --session "sessions/toml/*.toml" --output run_colab.ipynb
+```
+
+Everything the sessions set is already in it: the model and its settings, the
+region of interest, the number of animals, the tracking settings. Then:
+
+1. Put the videos and `best.pt` in one folder on Google Drive. Subfolders are
+   fine: each file is found by its name, and the notebook lists what it needs.
+2. Open the notebook in Colab and set that folder in the first cell. It is the
+   only thing to edit.
+3. Choose a GPU runtime and Run all.
+
+It installs this fork and `ultralytics`, exports the contours, tracks each
+session on the Colab disk, copies each finished one to `tracked/` in the Drive
+folder, and keeps `tracking_timetable.csv` there (GPU, start, end and hours per
+session, read from each `idtrackerai.log`). After a disconnect, Run all again:
+what is finished is skipped. Paths of your own computer are never written into
+the notebook.
+
+The same button and command work for [SAM 3](sam3-pipeline.md) and
+[Detectron2](detectron2-pipeline.md) sessions; the notebook installs only the
+package its model needs. To install the fork from a branch instead of the
+default one, pass `--install-from "git+https://github.com/mbel-tech/idtrackerai-CYSM.git@<branch>"`.
+
+### In Colab, by hand
 
 Build the bundle on your own machine with `idtrackerai_d2_bundle`, upload it
 with `best.pt` and the session `.toml` files, and in a GPU runtime:

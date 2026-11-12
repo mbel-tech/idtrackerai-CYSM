@@ -311,6 +311,16 @@ the Colab notebook, which `idtrackerai_d2_bundle` packages for you.
 idtrackerai_d2_bundle          # ~27 KB zip of just what Colab needs
 ```
 
+Once a model is trained, a session can go to Colab on its own, without the
+bundle: step 6's **Save Colab notebook...** button, or
+`idtrackerai_colab_notebook --session <files>.toml --output run_colab.ipynb`,
+writes a notebook that already holds the session's settings. Put the videos
+and `model_final.pth` (with `training_metadata.json` beside it) in one Drive
+folder, set that folder in the first cell, choose a GPU runtime and Run all.
+It exports the contours and tracks; see
+[the YOLO page](yolo-pipeline.md#in-colab-from-one-notebook) for the details,
+which are the same for every model.
+
 Upload to `MyDrive/idtrackerai_CYSM/`:
 
 ```
